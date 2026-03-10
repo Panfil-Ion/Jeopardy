@@ -1,0 +1,5 @@
+node_modules/
+game_state.json
+client/dist/
+server/public/
+.env
