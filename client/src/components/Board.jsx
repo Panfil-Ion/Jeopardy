@@ -1,6 +1,8 @@
-export default function Board({ questions, onSelectQuestion, isControl = false, isDisplay = false }) {
+export default function Board({ questions, onSelectQuestion, isControl = false, isDisplay = false, hidesPractice }) {
   const categories = [...new Set(questions.map(q => q.category))];
   const pointValues = [100, 200, 300, 400, 500];
+  // hidesPractice takes precedence if provided; otherwise fall back to isDisplay behaviour
+  const hidePractice = hidesPractice !== undefined ? hidesPractice : isDisplay;
 
   return (
     <div style={styles.boardContainer}>
@@ -24,7 +26,7 @@ export default function Board({ questions, onSelectQuestion, isControl = false, 
             let cellStyle = { ...styles.cell };
             if (isUsed) {
               cellStyle = { ...cellStyle, ...styles.usedCell };
-            } else if (isPractical && !isDisplay) {
+            } else if (isPractical && !hidePractice) {
               cellStyle = { ...cellStyle, ...styles.practicalCell };
             }
 
@@ -39,7 +41,7 @@ export default function Board({ questions, onSelectQuestion, isControl = false, 
                 ) : (
                   <>
                     <span style={styles.pointValue}>${points}</span>
-                    {isPractical && !isDisplay && (
+                    {isPractical && !hidePractice && (
                       <span style={styles.practicalBadge}>⚙ PRACTICE</span>
                     )}
                   </>

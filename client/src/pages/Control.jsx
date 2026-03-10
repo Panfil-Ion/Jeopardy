@@ -13,7 +13,6 @@ export default function Control() {
   const pass = searchParams.get('pass');
   const [authorized, setAuthorized] = useState(null); // null = checking
   const [gameState, setGameState] = useState(null);
-  const [deductPoints, setDeductPoints] = useState(false);
   const [adjustAmounts, setAdjustAmounts] = useState({});
 
   // Password check
@@ -112,7 +111,7 @@ export default function Control() {
 
   function handleJudge(correct) {
     if (!firstInQueue) return;
-    socket.emit('judge_answer', { correct, teamId: firstInQueue.teamId, deductPoints: !correct && deductPoints });
+    socket.emit('judge_answer', { correct, teamId: firstInQueue.teamId });
   }
 
   function handleAdjustScore(teamId, delta) {
@@ -132,7 +131,7 @@ export default function Control() {
         <div style={styles.leftCol}>
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>📋 Question Board</h2>
-            <Board questions={questions} onSelectQuestion={handleSelectQuestion} isControl={true} isDisplay={false} />
+            <Board questions={questions} onSelectQuestion={handleSelectQuestion} isControl={true} isDisplay={false} hidesPractice={false} />
           </div>
         </div>
 
@@ -159,8 +158,33 @@ export default function Control() {
                 </div>
               </div>
 
-              {/* Judge buttons */}
-              {firstInQueue && (
+              {/* Judge buttons — practical vs normal */}
+              {currentQuestion.isPracticalTask ? (
+                <div style={styles.judgeSection}>
+                  <div style={{ color: '#FFA500', fontSize: '14px', marginBottom: '8px', fontWeight: 'bold' }}>
+                    🔧 Judecată Practică — judecă fiecare echipă individual
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {teams.map(team => (
+                      <div key={team.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px', background: '#0d0d3a', borderRadius: '4px' }}>
+                        <span style={{ flex: 1, color: 'white', fontSize: '13px' }}>{team.name}</span>
+                        <button
+                          style={{ ...styles.correctBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
+                          onClick={() => socket.emit('adjust_score', { teamId: team.id, delta: currentQuestion.points })}
+                        >
+                          ✅ +${currentQuestion.points}
+                        </button>
+                        <button
+                          style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
+                          onClick={() => socket.emit('adjust_score', { teamId: team.id, delta: -currentQuestion.points })}
+                        >
+                          ❌ -${currentQuestion.points}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : firstInQueue ? (
                 <div style={styles.judgeSection}>
                   <div style={styles.activeTeam}>
                     Answering: <strong style={{ color: '#FFD700' }}>
@@ -172,19 +196,11 @@ export default function Control() {
                       ✅ Correct (+${currentQuestion.points})
                     </button>
                     <button style={styles.wrongBtn} onClick={() => handleJudge(false)}>
-                      ❌ Wrong {deductPoints ? `(-$${currentQuestion.points})` : ''}
+                      ❌ Wrong (-${currentQuestion.points})
                     </button>
                   </div>
-                  <label style={styles.deductLabel}>
-                    <input
-                      type="checkbox"
-                      checked={deductPoints}
-                      onChange={e => setDeductPoints(e.target.checked)}
-                    />
-                    {' '}Deduct points on wrong answer
-                  </label>
                 </div>
-              )}
+              ) : null}
 
               {/* Timer controls */}
               <div style={styles.controlRow}>
@@ -451,14 +467,6 @@ const styles = {
     cursor: 'pointer',
     fontFamily: '"Arial Black", Arial, sans-serif',
     fontWeight: 'bold',
-  },
-  deductLabel: {
-    color: '#aaa',
-    fontSize: '12px',
-    display: 'flex',
-    alignItems: 'center',
-    gap: '4px',
-    cursor: 'pointer',
   },
   controlRow: {
     display: 'flex',
