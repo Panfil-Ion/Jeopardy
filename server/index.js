@@ -87,7 +87,23 @@ app.get('/api/check-team-password', rateLimitMiddleware, (req, res) => {
   }
 });
 
-// Check at startup whether the SPA index.html exists and cache its contents
+// Team registration endpoint (rate limited)
+app.post('/api/register-team', rateLimitMiddleware, (req, res) => {
+  const { teamId, teamName, password } = req.body;
+  const expected = TEAM_PASSWORDS[teamId];
+  if (!expected) return res.status(404).json({ ok: false, error: 'Team slot not found' });
+  if (password !== expected) return res.status(403).json({ ok: false, error: 'Wrong password' });
+  if (state.teams.find(t => t.id === teamId)) {
+    return res.status(409).json({ ok: false, error: 'Already registered' });
+  }
+  const name = (teamName || '').trim() || teamId;
+  state.teams.push({ id: teamId, name, score: 0 });
+  saveState(state);
+  io.emit('game_state', state);
+  res.json({ ok: true });
+});
+
+
 const spaIndexFile = path.join(publicDir, 'index.html');
 const spaIndexContent = fs.existsSync(spaIndexFile) ? fs.readFileSync(spaIndexFile, 'utf8') : null;
 
@@ -204,9 +220,8 @@ io.on('connection', (socket) => {
       state.answerRevealed = false;
       state.timerActive = false;
     } else {
-      if (deductPoints) {
-        state.teams = subtractPoints(state.teams, teamId, points);
-      }
+      // Always deduct points on wrong answer
+      state.teams = subtractPoints(state.teams, teamId, points);
       // Move to next team in queue
       state.buzzerQueue = nextTeam(state.buzzerQueue);
     }

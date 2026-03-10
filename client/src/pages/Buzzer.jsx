@@ -11,18 +11,19 @@ export default function Buzzer() {
   const [buzzed, setBuzzed] = useState(false);
   const wakeLockRef = useRef(null);
 
-  // Password gate state
-  const authKey = `buzzer_auth_${teamId}`;
-  const [authenticated, setAuthenticated] = useState(
-    () => teamId ? sessionStorage.getItem(`buzzer_auth_${teamId}`) === '1' : false
+  // Registration state
+  const registeredKey = `buzzer_registered_${teamId}`;
+  const [registered, setRegistered] = useState(
+    () => teamId ? Boolean(sessionStorage.getItem(`buzzer_registered_${teamId}`)) : false
   );
+  const [teamNameInput, setTeamNameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [passwordChecking, setPasswordChecking] = useState(false);
+  const [regError, setRegError] = useState('');
+  const [regChecking, setRegChecking] = useState(false);
 
   // Wake Lock API
   useEffect(() => {
-    if (!authenticated) return;
+    if (!registered) return;
 
     async function requestWakeLock() {
       try {
@@ -51,10 +52,10 @@ export default function Buzzer() {
         wakeLockRef.current.release().catch(() => {});
       }
     };
-  }, [authenticated]);
+  }, [registered]);
 
   useEffect(() => {
-    if (!authenticated) return;
+    if (!registered) return;
 
     function onGameState(state) {
       setGameState(state);
@@ -106,7 +107,7 @@ export default function Buzzer() {
       socket.off('score_update', onScoreUpdate);
       socket.off('question_close', onQuestionClose);
     };
-  }, [authenticated]);
+  }, [registered]);
 
   if (!teamId) {
     return (
@@ -117,56 +118,69 @@ export default function Buzzer() {
     );
   }
 
-  // Password gate
-  async function handlePasswordSubmit(e) {
+  // Registration form
+  async function handleRegisterSubmit(e) {
     e.preventDefault();
-    if (!passwordInput.trim()) return;
-    setPasswordChecking(true);
-    setPasswordError('');
+    const name = teamNameInput.trim();
+    const pass = passwordInput.trim();
+    if (!name || !pass) {
+      setRegError('⚠️ Completează ambele câmpuri.');
+      return;
+    }
+    setRegChecking(true);
+    setRegError('');
     try {
-      const res = await fetch(
-        `/api/check-team-password?team=${encodeURIComponent(teamId)}&pass=${encodeURIComponent(passwordInput)}`
-      );
+      const res = await fetch('/api/register-team', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId, teamName: name, password: pass }),
+      });
       const data = await res.json();
       if (data.ok) {
-        sessionStorage.setItem(authKey, '1');
-        setAuthenticated(true);
+        sessionStorage.setItem(registeredKey, name);
+        setRegistered(true);
       } else {
-        setPasswordError('❌ Incorrect password');
+        setRegError(`❌ ${data.error || 'Înregistrare eșuată'}`);
       }
     } catch {
-      setPasswordError('❌ Connection error. Try again.');
+      setRegError('❌ Eroare de conexiune. Încearcă din nou.');
     } finally {
-      setPasswordChecking(false);
+      setRegChecking(false);
     }
   }
 
-  if (!authenticated) {
-    const teamLabel = teamId.replace('team', 'Echipa ');
-
+  if (!registered) {
     return (
       <div style={styles.passwordPage}>
-        <h1 style={styles.passwordTitle}>{teamLabel}</h1>
-        <p style={styles.passwordSubtitle}>Enter team password to continue</p>
-        <form onSubmit={handlePasswordSubmit} style={styles.passwordForm}>
+        <h1 style={styles.passwordTitle}>Înregistrare Echipă</h1>
+        <p style={styles.passwordSubtitle}>Slot: <strong style={{ color: '#FFD700' }}>{teamId}</strong></p>
+        <form onSubmit={handleRegisterSubmit} style={styles.passwordForm}>
+          <input
+            type="text"
+            value={teamNameInput}
+            onChange={e => setTeamNameInput(e.target.value)}
+            placeholder="Numele echipei tale"
+            style={styles.passwordInput}
+            autoFocus
+            autoComplete="off"
+          />
           <input
             type="password"
             value={passwordInput}
             onChange={e => setPasswordInput(e.target.value)}
-            placeholder="Password"
+            placeholder="Parola echipei"
             style={styles.passwordInput}
-            autoFocus
             autoComplete="current-password"
           />
-          {passwordError && (
-            <div style={styles.passwordError}>{passwordError}</div>
+          {regError && (
+            <div style={styles.passwordError}>{regError}</div>
           )}
           <button
             type="submit"
             style={styles.passwordBtn}
-            disabled={passwordChecking}
+            disabled={regChecking}
           >
-            {passwordChecking ? '...' : 'Enter'}
+            {regChecking ? '...' : 'Înregistrează-te'}
           </button>
         </form>
       </div>
@@ -180,13 +194,7 @@ export default function Buzzer() {
   const team = gameState.teams.find(t => t.id === teamId);
 
   if (!team) {
-    return (
-      <div style={styles.error}>
-        <h1 style={styles.errorTitle}>❌ Invalid Team ID</h1>
-        <p style={styles.errorText}>Team <strong>"{teamId}"</strong> not found.</p>
-        <p style={styles.errorText}>Valid IDs: team1 – team10</p>
-      </div>
-    );
+    return <div style={styles.loading}>Se conectează la server...</div>;
   }
 
   const buzzersActive = gameState.buzzersActive;
