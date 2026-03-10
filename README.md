@@ -59,6 +59,10 @@ This runs both the backend (port 3001) and the Vite dev server concurrently.
 | Team 4 Buzzer | http://localhost:5173/buzzer?team=team4 | Team 4 phone |
 | Team 5 Buzzer | http://localhost:5173/buzzer?team=team5 | Team 5 phone |
 | Team 6 Buzzer | http://localhost:5173/buzzer?team=team6 | Team 6 phone |
+| Team 7 Buzzer | http://localhost:5173/buzzer?team=team7 | Team 7 phone |
+| Team 8 Buzzer | http://localhost:5173/buzzer?team=team8 | Team 8 phone |
+| Team 9 Buzzer | http://localhost:5173/buzzer?team=team9 | Team 9 phone |
+| Team 10 Buzzer | http://localhost:5173/buzzer?team=team10 | Team 10 phone |
 
 ## Configuration
 
@@ -86,6 +90,16 @@ Edit `server/gameState.js`:
 |---|---|---|
 | `PORT` | `3001` | Server port |
 | `CONTROL_PASSWORD` | `1234` | Password for /control panel |
+| `TEAM1_PASSWORD` | `echipa1` | Password for Team 1 buzzer |
+| `TEAM2_PASSWORD` | `echipa2` | Password for Team 2 buzzer |
+| `TEAM3_PASSWORD` | `echipa3` | Password for Team 3 buzzer |
+| `TEAM4_PASSWORD` | `echipa4` | Password for Team 4 buzzer |
+| `TEAM5_PASSWORD` | `echipa5` | Password for Team 5 buzzer |
+| `TEAM6_PASSWORD` | `echipa6` | Password for Team 6 buzzer |
+| `TEAM7_PASSWORD` | `echipa7` | Password for Team 7 buzzer |
+| `TEAM8_PASSWORD` | `echipa8` | Password for Team 8 buzzer |
+| `TEAM9_PASSWORD` | `echipa9` | Password for Team 9 buzzer |
+| `TEAM10_PASSWORD` | `echipa10` | Password for Team 10 buzzer |
 
 ## Production Build & Deployment
 
@@ -132,27 +146,30 @@ The audio system is already wired up. Replacing the files works immediately.
 
 1. Open `/display` on the projector Mac, click **"🎮 Start Game"**
 2. Open `/control?pass=1234` on the GM's PC
-3. Each team leader opens `/buzzer?team=teamX` on their phone
-4. GM clicks a question on the board to open it
-5. GM clicks **"🔔 Activate Buzzers"**
-6. Teams tap **BUZZ** on their phones
-7. The display shows the buzzer queue (ordered by server timestamp)
-8. GM clicks **✅ Correct** or **❌ Wrong** to judge
-9. Correct: points awarded, question marked used, confetti plays
-10. Wrong: optionally deduct points, move to next team in queue
+3. Each team leader opens `/buzzer?team=teamX` on their phone and enters their team password
+4. GM clicks a question on the board to open it — **buzzers activate automatically**
+5. Teams tap **BUZZ** on their phones
+6. The display shows the buzzer queue (ordered by server timestamp)
+7. GM clicks **✅ Correct** or **❌ Wrong** to judge
+8. Correct: points awarded, question marked used, confetti plays
+9. Wrong: optionally deduct points, move to next team in queue
+10. GM clicks **🔇 Reset Buzzers** between attempts if needed
 
 ## Features
 
 - ✅ 5×5 Jeopardy board (5 categories × 5 point values)
 - ✅ Real-time WebSockets (Socket.io)
 - ✅ Buzzer system with server-side timestamp ordering
+- ✅ Buzzers auto-activate when GM opens a question
 - ✅ Password-protected GM panel
+- ✅ Password-protected team buzzer pages (per-team passwords via env vars)
 - ✅ Wake Lock API on team phones (screen stays on)
 - ✅ Auto-save game state + resume on restart
 - ✅ Confetti animation on correct answer
 - ✅ Sound effects (buzzer, correct, wrong)
 - ✅ Answer timer (15 seconds countdown)
-- ✅ Practical task questions (distinct orange color + badge)
+- ✅ Practical task questions — orange on GM panel only, hidden from students
 - ✅ Manual score adjustment
 - ✅ Answer reveal toggle
 - ✅ Full game reset
+- ✅ Supports up to 10 teams

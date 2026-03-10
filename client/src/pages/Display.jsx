@@ -163,7 +163,7 @@ export default function Display() {
         {/* Main board */}
         <div style={styles.boardSection}>
           <h1 style={styles.title}>JEOPARDY</h1>
-          <Board questions={gameState.questions} onSelectQuestion={null} />
+          <Board questions={gameState.questions} onSelectQuestion={null} isDisplay={true} />
           <Timer large />
         </div>
 

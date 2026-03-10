@@ -1,4 +1,4 @@
-export default function Board({ questions, onSelectQuestion, isControl = false }) {
+export default function Board({ questions, onSelectQuestion, isControl = false, isDisplay = false }) {
   const categories = [...new Set(questions.map(q => q.category))];
   const pointValues = [100, 200, 300, 400, 500];
 
@@ -24,7 +24,7 @@ export default function Board({ questions, onSelectQuestion, isControl = false }
             let cellStyle = { ...styles.cell };
             if (isUsed) {
               cellStyle = { ...cellStyle, ...styles.usedCell };
-            } else if (isPractical) {
+            } else if (isPractical && !isDisplay) {
               cellStyle = { ...cellStyle, ...styles.practicalCell };
             }
 
@@ -39,8 +39,8 @@ export default function Board({ questions, onSelectQuestion, isControl = false }
                 ) : (
                   <>
                     <span style={styles.pointValue}>${points}</span>
-                    {isPractical && (
-                      <span style={styles.practicalBadge}>🔧 PRACTICE</span>
+                    {isPractical && !isDisplay && (
+                      <span style={styles.practicalBadge}>⚙ PRACTICE</span>
                     )}
                   </>
                 )}

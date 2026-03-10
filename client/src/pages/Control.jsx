@@ -132,7 +132,7 @@ export default function Control() {
         <div style={styles.leftCol}>
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>📋 Question Board</h2>
-            <Board questions={questions} onSelectQuestion={handleSelectQuestion} isControl={true} />
+            <Board questions={questions} onSelectQuestion={handleSelectQuestion} isControl={true} isDisplay={false} />
           </div>
         </div>
 

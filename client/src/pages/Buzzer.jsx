@@ -11,8 +11,19 @@ export default function Buzzer() {
   const [buzzed, setBuzzed] = useState(false);
   const wakeLockRef = useRef(null);
 
+  // Password gate state
+  const authKey = `buzzer_auth_${teamId}`;
+  const [authenticated, setAuthenticated] = useState(
+    () => teamId ? sessionStorage.getItem(`buzzer_auth_${teamId}`) === '1' : false
+  );
+  const [passwordInput, setPasswordInput] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordChecking, setPasswordChecking] = useState(false);
+
   // Wake Lock API
   useEffect(() => {
+    if (!authenticated) return;
+
     async function requestWakeLock() {
       try {
         if ('wakeLock' in navigator) {
@@ -40,9 +51,11 @@ export default function Buzzer() {
         wakeLockRef.current.release().catch(() => {});
       }
     };
-  }, []);
+  }, [authenticated]);
 
   useEffect(() => {
+    if (!authenticated) return;
+
     function onGameState(state) {
       setGameState(state);
       setBuzzerQueue(state.buzzerQueue || []);
@@ -93,13 +106,69 @@ export default function Buzzer() {
       socket.off('score_update', onScoreUpdate);
       socket.off('question_close', onQuestionClose);
     };
-  }, []);
+  }, [authenticated]);
 
   if (!teamId) {
     return (
       <div style={styles.error}>
         <h1 style={styles.errorTitle}>❌ Missing Team ID</h1>
         <p style={styles.errorText}>Open this page as: <code>/buzzer?team=team1</code></p>
+      </div>
+    );
+  }
+
+  // Password gate
+  async function handlePasswordSubmit(e) {
+    e.preventDefault();
+    if (!passwordInput.trim()) return;
+    setPasswordChecking(true);
+    setPasswordError('');
+    try {
+      const res = await fetch(
+        `/api/check-team-password?team=${encodeURIComponent(teamId)}&pass=${encodeURIComponent(passwordInput)}`
+      );
+      const data = await res.json();
+      if (data.ok) {
+        sessionStorage.setItem(authKey, '1');
+        setAuthenticated(true);
+      } else {
+        setPasswordError('❌ Incorrect password');
+      }
+    } catch {
+      setPasswordError('❌ Connection error. Try again.');
+    } finally {
+      setPasswordChecking(false);
+    }
+  }
+
+  if (!authenticated) {
+    const teamLabel = teamId.replace('team', 'Echipa ');
+
+    return (
+      <div style={styles.passwordPage}>
+        <h1 style={styles.passwordTitle}>{teamLabel}</h1>
+        <p style={styles.passwordSubtitle}>Enter team password to continue</p>
+        <form onSubmit={handlePasswordSubmit} style={styles.passwordForm}>
+          <input
+            type="password"
+            value={passwordInput}
+            onChange={e => setPasswordInput(e.target.value)}
+            placeholder="Password"
+            style={styles.passwordInput}
+            autoFocus
+            autoComplete="current-password"
+          />
+          {passwordError && (
+            <div style={styles.passwordError}>{passwordError}</div>
+          )}
+          <button
+            type="submit"
+            style={styles.passwordBtn}
+            disabled={passwordChecking}
+          >
+            {passwordChecking ? '...' : 'Enter'}
+          </button>
+        </form>
       </div>
     );
   }
@@ -115,7 +184,7 @@ export default function Buzzer() {
       <div style={styles.error}>
         <h1 style={styles.errorTitle}>❌ Invalid Team ID</h1>
         <p style={styles.errorText}>Team <strong>"{teamId}"</strong> not found.</p>
-        <p style={styles.errorText}>Valid IDs: team1, team2, team3, team4, team5, team6</p>
+        <p style={styles.errorText}>Valid IDs: team1 – team10</p>
       </div>
     );
   }
@@ -190,6 +259,70 @@ export default function Buzzer() {
 }
 
 const styles = {
+  passwordPage: {
+    minHeight: '100vh',
+    background: '#060ce9',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: '20px',
+    padding: '30px',
+  },
+  passwordTitle: {
+    color: '#FFD700',
+    fontSize: '48px',
+    fontFamily: '"Arial Black", Arial, sans-serif',
+    letterSpacing: '2px',
+    textShadow: '2px 2px 4px #000',
+    textAlign: 'center',
+  },
+  passwordSubtitle: {
+    color: 'white',
+    fontSize: '20px',
+    fontFamily: 'Arial, sans-serif',
+    textAlign: 'center',
+  },
+  passwordForm: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '16px',
+    width: '100%',
+    maxWidth: '340px',
+  },
+  passwordInput: {
+    width: '100%',
+    padding: '16px 20px',
+    fontSize: '24px',
+    borderRadius: '10px',
+    border: '3px solid #FFD700',
+    background: '#1a1a4a',
+    color: 'white',
+    textAlign: 'center',
+    fontFamily: 'Arial, sans-serif',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  passwordError: {
+    color: '#ff6b6b',
+    fontSize: '20px',
+    fontFamily: '"Arial Black", Arial, sans-serif',
+    textAlign: 'center',
+  },
+  passwordBtn: {
+    width: '100%',
+    padding: '18px',
+    fontSize: '28px',
+    fontFamily: '"Arial Black", Arial, sans-serif',
+    fontWeight: 'bold',
+    background: '#FFD700',
+    color: '#060ce9',
+    border: 'none',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    letterSpacing: '2px',
+  },
   loading: {
     minHeight: '100vh',
     background: '#060ce9',

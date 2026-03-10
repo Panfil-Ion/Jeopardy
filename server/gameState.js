@@ -10,6 +10,10 @@ const DEFAULT_TEAMS = [
   { id: 'team4', name: 'Echipa 4', score: 0 },
   { id: 'team5', name: 'Echipa 5', score: 0 },
   { id: 'team6', name: 'Echipa 6', score: 0 },
+  { id: 'team7', name: 'Echipa 7', score: 0 },
+  { id: 'team8', name: 'Echipa 8', score: 0 },
+  { id: 'team9', name: 'Echipa 9', score: 0 },
+  { id: 'team10', name: 'Echipa 10', score: 0 },
 ];
 
 const DEFAULT_QUESTIONS = [
