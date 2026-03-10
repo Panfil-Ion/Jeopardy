@@ -12,6 +12,19 @@ const { adjustScore, addPoints, subtractPoints } = require('./scoreManager');
 const PORT = process.env.PORT || 3001;
 const CONTROL_PASSWORD = process.env.CONTROL_PASSWORD || '1234';
 
+const TEAM_PASSWORDS = {
+  team1: process.env.TEAM1_PASSWORD || 'echipa1',
+  team2: process.env.TEAM2_PASSWORD || 'echipa2',
+  team3: process.env.TEAM3_PASSWORD || 'echipa3',
+  team4: process.env.TEAM4_PASSWORD || 'echipa4',
+  team5: process.env.TEAM5_PASSWORD || 'echipa5',
+  team6: process.env.TEAM6_PASSWORD || 'echipa6',
+  team7: process.env.TEAM7_PASSWORD || 'echipa7',
+  team8: process.env.TEAM8_PASSWORD || 'echipa8',
+  team9: process.env.TEAM9_PASSWORD || 'echipa9',
+  team10: process.env.TEAM10_PASSWORD || 'echipa10',
+};
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -62,6 +75,18 @@ app.get('/api/check-password', rateLimitMiddleware, (req, res) => {
   }
 });
 
+// Team buzzer password check endpoint (rate limited)
+app.get('/api/check-team-password', rateLimitMiddleware, (req, res) => {
+  const { team, pass } = req.query;
+  const expected = TEAM_PASSWORDS[team];
+  if (!expected) return res.status(404).json({ ok: false, error: 'Team not found' });
+  if (pass === expected) {
+    res.json({ ok: true });
+  } else {
+    res.status(403).json({ ok: false });
+  }
+});
+
 // Check at startup whether the SPA index.html exists and cache its contents
 const spaIndexFile = path.join(publicDir, 'index.html');
 const spaIndexContent = fs.existsSync(spaIndexFile) ? fs.readFileSync(spaIndexFile, 'utf8') : null;
@@ -94,12 +119,13 @@ io.on('connection', (socket) => {
 
     state.currentQuestion = question;
     state.answerRevealed = false;
-    state.buzzersActive = false;
+    state.buzzersActive = true;
     state.buzzerQueue = resetQueue();
     state.timerActive = false;
     saveState(state);
 
     io.emit('question_open', question);
+    io.emit('buzzer_activated');
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('game_state', state);
   });
