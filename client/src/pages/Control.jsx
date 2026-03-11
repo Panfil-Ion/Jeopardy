@@ -175,10 +175,10 @@ export default function Control() {
                           ✅ +${currentQuestion.points}
                         </button>
                         <button
-                          style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
-                          onClick={() => socket.emit('adjust_score', { teamId: team.id, delta: -currentQuestion.points })}
+                          style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px', background: '#555' }}
+                          onClick={() => socket.emit('close_question')}
                         >
-                          ❌ -${currentQuestion.points}
+                          ⏭ Skip (0 pts)
                         </button>
                       </div>
                     ))}

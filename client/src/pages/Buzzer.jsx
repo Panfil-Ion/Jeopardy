@@ -14,7 +14,7 @@ export default function Buzzer() {
   // Registration state
   const registeredKey = `buzzer_registered_${teamId}`;
   const [registered, setRegistered] = useState(
-    () => teamId ? Boolean(sessionStorage.getItem(`buzzer_registered_${teamId}`)) : false
+    () => teamId ? Boolean(localStorage.getItem(`buzzer_registered_${teamId}`)) : false
   );
   const [teamNameInput, setTeamNameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
@@ -137,7 +137,7 @@ export default function Buzzer() {
       });
       const data = await res.json();
       if (data.ok) {
-        sessionStorage.setItem(registeredKey, name);
+        localStorage.setItem(registeredKey, name);
         setRegistered(true);
       } else {
         setRegError(`❌ ${data.error || 'Înregistrare eșuată'}`);

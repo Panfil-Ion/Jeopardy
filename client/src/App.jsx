@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Display from './pages/Display.jsx';
 import Control from './pages/Control.jsx';
 import Buzzer from './pages/Buzzer.jsx';
+import Editor from './pages/Editor.jsx';
 
 export default function App() {
   return (
@@ -10,6 +11,7 @@ export default function App() {
         <Route path="/display" element={<Display />} />
         <Route path="/control" element={<Control />} />
         <Route path="/buzzer" element={<Buzzer />} />
+        <Route path="/editor" element={<Editor />} />
         <Route path="/" element={<Navigate to="/display" replace />} />
       </Routes>
     </BrowserRouter>

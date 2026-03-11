@@ -16,7 +16,7 @@ export default function QuestionModal({ question, answerRevealed, isControl = fa
           {question.question}
         </div>
 
-        {(answerRevealed || isControl) && (
+        {!question.isPracticalTask && (answerRevealed || isControl) && (
           <div style={styles.answerSection}>
             <div style={styles.answerLabel}>ANSWER:</div>
             <div style={styles.answerText}>{question.answer}</div>
