@@ -10,7 +10,7 @@ const { addBuzz, resetQueue, nextTeam } = require('./buzzerManager');
 const { adjustScore, addPoints, subtractPoints } = require('./scoreManager');
 
 const PORT = process.env.PORT || 3001;
-const CONTROL_PASSWORD = process.env.CONTROL_PASSWORD || '1234';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin1234';
 
 const TEAM_PASSWORDS = {
   team1: process.env.TEAM1_PASSWORD || 'echipa1',
@@ -68,7 +68,7 @@ function rateLimitMiddleware(req, res, next) {
 // Password check endpoint (rate limited)
 app.get('/api/check-password', rateLimitMiddleware, (req, res) => {
   const { pass } = req.query;
-  if (pass === CONTROL_PASSWORD) {
+  if (pass === ADMIN_PASSWORD) {
     res.json({ ok: true });
   } else {
     res.status(403).json({ ok: false });
@@ -94,10 +94,21 @@ app.post('/api/register-team', rateLimitMiddleware, (req, res) => {
   if (!expected) return res.status(404).json({ ok: false, error: 'Team slot not found' });
   if (password !== expected) return res.status(403).json({ ok: false, error: 'Wrong password' });
   if (state.teams.find(t => t.id === teamId)) {
-    return res.status(409).json({ ok: false, error: 'Already registered' });
+    return res.json({ ok: true });
   }
   const name = (teamName || '').trim() || teamId;
   state.teams.push({ id: teamId, name, score: 0 });
+  saveState(state);
+  io.emit('game_state', state);
+  res.json({ ok: true });
+});
+
+
+app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res) => {
+  const { questions, pass } = req.body;
+  if (pass !== ADMIN_PASSWORD) return res.status(403).json({ ok: false, error: 'Unauthorized' });
+  if (!Array.isArray(questions)) return res.status(400).json({ ok: false });
+  state.questions = questions;
   saveState(state);
   io.emit('game_state', state);
   res.json({ ok: true });
@@ -208,6 +219,7 @@ io.on('connection', (socket) => {
     if (!state.currentQuestion) return;
 
     const points = state.currentQuestion.points;
+    const isPractical = state.currentQuestion.isPracticalTask;
 
     if (correct) {
       state.teams = addPoints(state.teams, teamId, points);
@@ -220,8 +232,10 @@ io.on('connection', (socket) => {
       state.answerRevealed = false;
       state.timerActive = false;
     } else {
-      // Always deduct points on wrong answer
-      state.teams = subtractPoints(state.teams, teamId, points);
+      // For practical tasks, wrong answer does NOT deduct points
+      if (!isPractical) {
+        state.teams = subtractPoints(state.teams, teamId, points);
+      }
       // Move to next team in queue
       state.buzzerQueue = nextTeam(state.buzzerQueue);
     }
@@ -302,5 +316,5 @@ io.on('connection', (socket) => {
 
 server.listen(PORT, () => {
   console.log(`Jeopardy server running on port ${PORT}`);
-  console.log(`Control password: ${CONTROL_PASSWORD}`);
+  console.log(`Admin password: ${ADMIN_PASSWORD}`);
 });
