@@ -1,27 +1,17 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import socket from '../socket.js';
 import Board from '../components/Board.jsx';
 import Scoreboard from '../components/Scoreboard.jsx';
 import BuzzerQueue from '../components/BuzzerQueue.jsx';
 import QuestionModal from '../components/QuestionModal.jsx';
-
-const CONTROL_PASSWORD = import.meta.env.VITE_CONTROL_PASSWORD;
+import AdminPasswordGate from '../components/AdminPasswordGate.jsx';
 
 export default function Control() {
-  const [searchParams] = useSearchParams();
-  const pass = searchParams.get('pass');
-  const [authorized, setAuthorized] = useState(null); // null = checking
+  const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [adjustAmounts, setAdjustAmounts] = useState({});
 
-  // Password check
-  useEffect(() => {
-    fetch(`/api/check-password?pass=${encodeURIComponent(pass || '')}`)
-      .then(r => r.json())
-      .then(data => setAuthorized(data.ok))
-      .catch(() => setAuthorized(false));
-  }, [pass]);
+  // Password check replaced by AdminPasswordGate component
 
   // Always set up socket listeners (independent of auth state)
   useEffect(() => {
@@ -84,18 +74,8 @@ export default function Control() {
     };
   }, []);
 
-  if (authorized === null) {
-    return <div style={styles.loading}>Checking access...</div>;
-  }
-
   if (!authorized) {
-    return (
-      <div style={styles.denied}>
-        <h1 style={styles.deniedTitle}>🔒 Access Denied</h1>
-        <p style={styles.deniedText}>Invalid or missing password.</p>
-        <p style={styles.deniedText}>Use <code style={styles.code}>/control?pass=YOUR_PASSWORD</code></p>
-      </div>
-    );
+    return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
   }
 
   if (!gameState) {
@@ -324,33 +304,6 @@ const styles = {
     justifyContent: 'center',
     fontSize: '24px',
     fontFamily: '"Arial Black", Arial, sans-serif',
-  },
-  denied: {
-    minHeight: '100vh',
-    background: '#111',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '16px',
-    padding: '40px',
-  },
-  deniedTitle: {
-    color: '#f44336',
-    fontSize: '48px',
-    fontFamily: '"Arial Black", Arial, sans-serif',
-  },
-  deniedText: {
-    color: '#aaa',
-    fontSize: '18px',
-    fontFamily: 'Arial, sans-serif',
-  },
-  code: {
-    background: '#222',
-    padding: '2px 8px',
-    borderRadius: '4px',
-    color: '#FFD700',
-    fontFamily: 'monospace',
   },
   page: {
     minHeight: '100vh',
