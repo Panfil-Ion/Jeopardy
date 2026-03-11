@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import confetti from 'canvas-confetti';
 import socket from '../socket.js';
 import Board from '../components/Board.jsx';
@@ -7,6 +6,7 @@ import Scoreboard from '../components/Scoreboard.jsx';
 import BuzzerQueue from '../components/BuzzerQueue.jsx';
 import Timer from '../components/Timer.jsx';
 import QuestionModal from '../components/QuestionModal.jsx';
+import AdminPasswordGate from '../components/AdminPasswordGate.jsx';
 
 // Audio setup
 function createAudio(src) {
@@ -16,9 +16,7 @@ function createAudio(src) {
 }
 
 export default function Display() {
-  const [searchParams] = useSearchParams();
-  const pass = searchParams.get('pass');
-  const [authorized, setAuthorized] = useState(null); // null = checking
+  const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [flashOverlay, setFlashOverlay] = useState(null); // 'correct' | 'wrong' | null
@@ -26,13 +24,7 @@ export default function Display() {
 
   const audios = useRef({});
 
-  // Password check
-  useEffect(() => {
-    fetch(`/api/check-password?pass=${encodeURIComponent(pass || '')}`)
-      .then(r => r.json())
-      .then(data => setAuthorized(data.ok))
-      .catch(() => setAuthorized(false));
-  }, [pass]);
+  // Password check replaced by AdminPasswordGate component
 
   function unlockAudio() {
     audios.current.buzzer = createAudio('/sounds/buzzer.mp3');
@@ -134,18 +126,8 @@ export default function Display() {
     };
   }, [audioUnlocked, prevQueueLength]);
 
-  if (authorized === null) {
-    return <div style={styles.loading}>Checking access...</div>;
-  }
-
   if (!authorized) {
-    return (
-      <div style={styles.denied}>
-        <h1 style={styles.deniedTitle}>🔒 Access Denied</h1>
-        <p style={styles.deniedText}>Invalid or missing password.</p>
-        <p style={styles.deniedText}>Use <code style={styles.code}>/display?pass=YOUR_PASSWORD</code></p>
-      </div>
-    );
+    return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
   }
 
   if (!audioUnlocked) {
@@ -211,33 +193,6 @@ export default function Display() {
 }
 
 const styles = {
-  denied: {
-    minHeight: '100vh',
-    background: '#111',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '16px',
-    padding: '40px',
-  },
-  deniedTitle: {
-    color: '#f44336',
-    fontSize: '48px',
-    fontFamily: '"Arial Black", Arial, sans-serif',
-  },
-  deniedText: {
-    color: '#aaa',
-    fontSize: '18px',
-    fontFamily: 'Arial, sans-serif',
-  },
-  code: {
-    background: '#222',
-    padding: '2px 8px',
-    borderRadius: '4px',
-    color: '#FFD700',
-    fontFamily: 'monospace',
-  },
   startScreen: {
     minHeight: '100vh',
     background: '#060ce9',

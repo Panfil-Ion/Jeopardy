@@ -10,7 +10,7 @@ const { addBuzz, resetQueue, nextTeam } = require('./buzzerManager');
 const { adjustScore, addPoints, subtractPoints } = require('./scoreManager');
 
 const PORT = process.env.PORT || 3001;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin1234';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin1231';
 
 const TEAM_PASSWORDS = {
   team1: process.env.TEAM1_PASSWORD || 'echipa1',
@@ -65,9 +65,18 @@ function rateLimitMiddleware(req, res, next) {
   next();
 }
 
-// Password check endpoint (rate limited)
+// Password check endpoint (rate limited) — supports both GET (legacy) and POST
 app.get('/api/check-password', rateLimitMiddleware, (req, res) => {
   const { pass } = req.query;
+  if (pass === ADMIN_PASSWORD) {
+    res.json({ ok: true });
+  } else {
+    res.status(403).json({ ok: false });
+  }
+});
+
+app.post('/api/check-password', rateLimitMiddleware, (req, res) => {
+  const { pass } = req.body;
   if (pass === ADMIN_PASSWORD) {
     res.json({ ok: true });
   } else {

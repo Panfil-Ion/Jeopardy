@@ -1,22 +1,15 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import socket from '../socket.js';
+import AdminPasswordGate from '../components/AdminPasswordGate.jsx';
 
 export default function Editor() {
-  const [searchParams] = useSearchParams();
-  const pass = searchParams.get('pass');
-  const [authorized, setAuthorized] = useState(null);
+  const [authorized, setAuthorized] = useState(false);
+  const [adminPass, setAdminPass] = useState('');
   const [questions, setQuestions] = useState([]);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
 
-  // Password check
-  useEffect(() => {
-    fetch(`/api/check-password?pass=${encodeURIComponent(pass || '')}`)
-      .then(r => r.json())
-      .then(data => setAuthorized(data.ok))
-      .catch(() => setAuthorized(false));
-  }, [pass]);
+  // Password check replaced by AdminPasswordGate component
 
   // Load questions from game state
   useEffect(() => {
@@ -34,18 +27,8 @@ export default function Editor() {
     };
   }, [authorized]);
 
-  if (authorized === null) {
-    return <div style={styles.loading}>Checking access...</div>;
-  }
-
   if (!authorized) {
-    return (
-      <div style={styles.denied}>
-        <h1 style={styles.deniedTitle}>🔒 Access Denied</h1>
-        <p style={styles.deniedText}>Invalid or missing password.</p>
-        <p style={styles.deniedText}>Use <code style={styles.code}>/editor?pass=YOUR_PASSWORD</code></p>
-      </div>
-    );
+    return <AdminPasswordGate onAuthorized={(pass) => { setAuthorized(true); setAdminPass(pass || sessionStorage.getItem('admin_password') || ''); }} />;
   }
 
   function updateQuestion(index, field, value) {
@@ -80,7 +63,7 @@ export default function Editor() {
       const res = await fetch('/api/update-questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questions, pass }),
+        body: JSON.stringify({ questions, pass: adminPass }),
       });
       const data = await res.json();
       if (data.ok) {
@@ -346,42 +329,5 @@ const styles = {
     padding: '6px 10px',
     cursor: 'pointer',
     fontSize: '16px',
-  },
-  loading: {
-    minHeight: '100vh',
-    background: '#111',
-    color: '#FFD700',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '24px',
-    fontFamily: '"Arial Black", Arial, sans-serif',
-  },
-  denied: {
-    minHeight: '100vh',
-    background: '#111',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: '16px',
-    padding: '40px',
-  },
-  deniedTitle: {
-    color: '#f44336',
-    fontSize: '48px',
-    fontFamily: '"Arial Black", Arial, sans-serif',
-  },
-  deniedText: {
-    color: '#aaa',
-    fontSize: '18px',
-    fontFamily: 'Arial, sans-serif',
-  },
-  code: {
-    background: '#222',
-    padding: '2px 8px',
-    borderRadius: '4px',
-    color: '#FFD700',
-    fontFamily: 'monospace',
   },
 };
