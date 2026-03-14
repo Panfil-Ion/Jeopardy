@@ -193,9 +193,45 @@ export default function Buzzer() {
 
   const team = gameState.teams.find(t => t.id === teamId);
 
-  if (!team) {
-    return <div style={styles.loading}>Se conectează la server...</div>;
+if (!team) {
+  // Echipa nu există în state => nu e conectare, e neînregistrată încă
+  // Forțăm afișarea formularului (fără să stricăm socket-ul).
+  if (registered) {
+    localStorage.removeItem(registeredKey);
+    setRegistered(false);
   }
+  return (
+    <div style={styles.passwordPage}>
+      <h1 style={styles.passwordTitle}>Înregistrare Echipă</h1>
+      <p style={styles.passwordSubtitle}>
+        Slot: <strong style={{ color: '#FFD700' }}>{teamId}</strong>
+      </p>
+      <form onSubmit={handleRegisterSubmit} style={styles.passwordForm}>
+        <input
+          type="text"
+          value={teamNameInput}
+          onChange={e => setTeamNameInput(e.target.value)}
+          placeholder="Numele echipei tale"
+          style={styles.passwordInput}
+          autoFocus
+          autoComplete="off"
+        />
+        <input
+          type="password"
+          value={passwordInput}
+          onChange={e => setPasswordInput(e.target.value)}
+          placeholder="Parola echipei"
+          style={styles.passwordInput}
+          autoComplete="current-password"
+        />
+        {regError && <div style={styles.passwordError}>{regError}</div>}
+        <button type="submit" style={styles.passwordBtn} disabled={regChecking}>
+          {regChecking ? '...' : 'Înregistrează-te'}
+        </button>
+      </form>
+    </div>
+  );
+}
 
   const buzzersActive = gameState.buzzersActive;
   const myPosition = buzzerQueue.findIndex(e => e.teamId === teamId);
