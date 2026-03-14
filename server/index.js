@@ -149,22 +149,35 @@ io.on('connection', (socket) => {
   });
 
   // GM selects a question
-  socket.on('select_question', ({ questionId }) => {
-    const question = state.questions.find(q => q.id === questionId);
-    if (!question || question.used) return;
+  // GM selects a question
+socket.on('select_question', ({ questionId }) => {
+  const question = state.questions.find(q => q.id === questionId);
+  if (!question || question.used) return;
 
-    state.currentQuestion = question;
-    state.answerRevealed = false;
+  state.currentQuestion = question;
+  state.answerRevealed = false;
+  
+  // AICI: activează buzzerele doar dacă nu e practică
+  if (question.isPracticalTask) {
+    state.buzzersActive = false;
+    state.buzzerQueue = []; // sau poti folosi resetQueue()
+  } else {
     state.buzzersActive = true;
     state.buzzerQueue = resetQueue();
-    state.timerActive = false;
-    saveState(state);
+  }
 
-    io.emit('question_open', question);
+  state.timerActive = false;
+  saveState(state);
+
+  io.emit('question_open', question);
+
+  // Trimite evenimentele doar dacă nu e practică
+  if (!question.isPracticalTask) {
     io.emit('buzzer_activated');
     io.emit('buzzer_update', state.buzzerQueue);
-    io.emit('game_state', state);
-  });
+  }
+  io.emit('game_state', state);
+});
 
   // GM closes question without judging
   socket.on('close_question', () => {
