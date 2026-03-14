@@ -11,14 +11,16 @@ export default function Buzzer() {
   const [buzzed, setBuzzed] = useState(false);
   const wakeLockRef = useRef(null);
 
-  // Keys
+  // Device lock: one team per device/browser
   const deviceTeamKey = 'buzzer_device_team';
-  const registeredKey = useMemo(() => `buzzer_registered_${teamId}`, [teamId]);
 
-  // Registration state
+  const registeredKey = useMemo(() => `buzzer_registered_${teamId}`, [teamId]);
+  const tokenKey = useMemo(() => `buzzer_team_token_${teamId}`, [teamId]);
+
   const [registered, setRegistered] = useState(
     () => (teamId ? Boolean(localStorage.getItem(`buzzer_registered_${teamId}`)) : false)
   );
+
   const [teamNameInput, setTeamNameInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
   const [regError, setRegError] = useState('');
@@ -27,17 +29,11 @@ export default function Buzzer() {
   const deviceTeam = teamId ? localStorage.getItem(deviceTeamKey) : null;
   const deviceLockedToOtherTeam = Boolean(deviceTeam && teamId && deviceTeam !== teamId);
 
-  function forceLogoutCurrentTeam() {
-    if (!teamId) return;
-    localStorage.removeItem(registeredKey);
-    setRegistered(false);
-  }
-
-  function forceDeviceLogout() {
-    // logout from ANY team on this device
+  function logoutDevice() {
     const existing = localStorage.getItem(deviceTeamKey);
     if (existing) {
       localStorage.removeItem(`buzzer_registered_${existing}`);
+      localStorage.removeItem(`buzzer_team_token_${existing}`);
     }
     localStorage.removeItem(deviceTeamKey);
   }
@@ -59,21 +55,18 @@ export default function Buzzer() {
     requestWakeLock();
 
     function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') {
-        requestWakeLock();
-      }
+      if (document.visibilityState === 'visible') requestWakeLock();
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release().catch(() => {});
-      }
+      if (wakeLockRef.current) wakeLockRef.current.release().catch(() => {});
     };
   }, [registered]);
 
+  // Socket listeners (only when registered)
   useEffect(() => {
     if (!registered) return;
 
@@ -108,12 +101,25 @@ export default function Buzzer() {
       setGameState(prev => (prev ? { ...prev, buzzersActive: false, buzzerQueue: [] } : prev));
     }
 
+    function onBuzzDenied({ teamId: deniedTeamId, reason }) {
+      if (deniedTeamId !== teamId) return;
+      if (reason === 'unauthorized') {
+        // Another phone logged in OR server restarted (tokens lost).
+        localStorage.removeItem(registeredKey);
+        localStorage.removeItem(tokenKey);
+        localStorage.removeItem(deviceTeamKey);
+        setRegistered(false);
+        setRegError('❌ Sesiunea ta a expirat sau alt dispozitiv s-a logat pe această echipă. Introdu parola din nou.');
+      }
+    }
+
     socket.on('game_state', onGameState);
     socket.on('buzzer_update', onBuzzerUpdate);
     socket.on('buzzer_activated', onBuzzerActivated);
     socket.on('buzzer_deactivated', onBuzzerDeactivated);
     socket.on('score_update', onScoreUpdate);
     socket.on('question_close', onQuestionClose);
+    socket.on('buzz_denied', onBuzzDenied);
 
     socket.emit('request_state');
 
@@ -124,8 +130,9 @@ export default function Buzzer() {
       socket.off('buzzer_deactivated', onBuzzerDeactivated);
       socket.off('score_update', onScoreUpdate);
       socket.off('question_close', onQuestionClose);
+      socket.off('buzz_denied', onBuzzDenied);
     };
-  }, [registered]);
+  }, [registered, teamId, registeredKey, tokenKey]);
 
   if (!teamId) {
     return (
@@ -138,64 +145,7 @@ export default function Buzzer() {
     );
   }
 
-  // Registration form
-  async function handleRegisterSubmit(e) {
-    e.preventDefault();
-
-    // Device is already locked to another team -> refuse unless user explicitly switches
-    const lockedTeam = localStorage.getItem(deviceTeamKey);
-    if (lockedTeam && lockedTeam !== teamId) {
-      setRegError(`❌ Telefonul este deja logat pe ${lockedTeam}. Apasă "Schimbă echipa" ca să continui.`);
-      return;
-    }
-
-    const name = teamNameInput.trim();
-    const pass = passwordInput.trim();
-    if (!name || !pass) {
-      setRegError('⚠️ Completează ambele câmpuri.');
-      return;
-    }
-
-    setRegChecking(true);
-    setRegError('');
-
-    try {
-      const res = await fetch('/api/register-team', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teamId, teamName: name, password: pass }),
-      });
-
-      let data = null;
-      try {
-        data = await res.json();
-      } catch {
-        // server returned non-json
-        data = { ok: false, error: `Server error (${res.status})` };
-      }
-
-      if (data.ok) {
-        // Lock device to this team
-        localStorage.setItem(deviceTeamKey, teamId);
-
-        localStorage.setItem(registeredKey, name);
-        setRegistered(true);
-
-        socket.emit('request_state');
-
-        // fallback for mobile timing issues
-        setTimeout(() => window.location.reload(), 800);
-      } else {
-        setRegError(`❌ ${data.error || 'Înregistrare eșuată'}`);
-      }
-    } catch {
-      setRegError('❌ Eroare de conexiune. Încearcă din nou.');
-    } finally {
-      setRegChecking(false);
-    }
-  }
-
-  // If device is locked to a different team, force showing login page (cannot auto-enter)
+  // If this device is already locked to another team -> block
   if (deviceLockedToOtherTeam) {
     return (
       <div style={styles.passwordPage}>
@@ -207,13 +157,11 @@ export default function Buzzer() {
           Pentru a intra pe <strong style={{ color: '#FFD700' }}>{teamId}</strong>, trebuie să schimbi echipa.
         </p>
 
-        {regError && <div style={styles.passwordError}>{regError}</div>}
-
         <button
           type="button"
           style={styles.passwordBtn}
           onClick={() => {
-            forceDeviceLogout();
+            logoutDevice();
             setRegError('');
             setTeamNameInput('');
             setPasswordInput('');
@@ -226,6 +174,52 @@ export default function Buzzer() {
     );
   }
 
+  // Login form (server-enforced)
+  async function handleRegisterSubmit(e) {
+    e.preventDefault();
+
+    const name = teamNameInput.trim();
+    const pass = passwordInput.trim();
+    if (!name || !pass) {
+      setRegError('⚠️ Completează ambele câmpuri.');
+      return;
+    }
+
+    setRegChecking(true);
+    setRegError('');
+
+    try {
+      const res = await fetch('/api/team-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teamId, teamName: name, password: pass }),
+      });
+
+      const data = await res.json();
+
+      if (data.ok && data.token) {
+        // lock device to this team
+        localStorage.setItem(deviceTeamKey, teamId);
+
+        // store "registered" + token
+        localStorage.setItem(registeredKey, name);
+        localStorage.setItem(tokenKey, data.token);
+
+        setRegistered(true);
+
+        // request fresh state and reload as fallback (mobile)
+        socket.emit('request_state');
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        setRegError(`❌ ${data.error || 'Login eșuat'}`);
+      }
+    } catch {
+      setRegError('❌ Eroare de conexiune. Încearcă din nou.');
+    } finally {
+      setRegChecking(false);
+    }
+  }
+
   if (!registered) {
     return (
       <div style={styles.passwordPage}>
@@ -233,7 +227,6 @@ export default function Buzzer() {
         <p style={styles.passwordSubtitle}>
           Slot: <strong style={{ color: '#FFD700' }}>{teamId}</strong>
         </p>
-
         <form onSubmit={handleRegisterSubmit} style={styles.passwordForm}>
           <input
             type="text"
@@ -267,13 +260,11 @@ export default function Buzzer() {
 
   const team = gameState.teams.find(t => t.id === teamId);
 
-  // ✅ FIX: nu mai sta blocat pe "Se conectează la server..."
-  // Dacă ai localStorage registered, dar serverul nu are echipa (ex: server restart),
-  // te delogăm și te punem să te înregistrezi din nou.
+  // ✅ Fix: no infinite "Se conectează..."
+  // If server doesn't have the team, force re-login.
   if (!team) {
-    // reset local auth for this team
     localStorage.removeItem(registeredKey);
-    // also reset device lock because it's stale (server forgot the team)
+    localStorage.removeItem(tokenKey);
     localStorage.removeItem(deviceTeamKey);
     return (
       <div style={styles.passwordPage}>
@@ -281,12 +272,8 @@ export default function Buzzer() {
         <p style={styles.passwordSubtitle}>
           Serverul nu găsește echipa <strong style={{ color: '#FFD700' }}>{teamId}</strong> (posibil restart).
         </p>
-        <button
-          type="button"
-          style={styles.passwordBtn}
-          onClick={() => window.location.reload()}
-        >
-          Reîncarcă și înregistrează-te din nou
+        <button type="button" style={styles.passwordBtn} onClick={() => window.location.reload()}>
+          Reîncarcă
         </button>
       </div>
     );
@@ -299,11 +286,21 @@ export default function Buzzer() {
 
   function handleBuzz() {
     if (!buzzersActive || buzzed) return;
-    socket.emit('buzz', { teamId, timestamp: Date.now() });
+
+    const token = localStorage.getItem(tokenKey);
+    if (!token) {
+      // no token -> force relogin
+      localStorage.removeItem(registeredKey);
+      localStorage.removeItem(deviceTeamKey);
+      setRegistered(false);
+      setRegError('❌ Token lipsă. Introdu parola din nou.');
+      return;
+    }
+
+    socket.emit('buzz', { teamId, token, timestamp: Date.now() });
     setBuzzed(true);
   }
 
-  // Determine button/status state
   let statusEl = null;
   let btnDisabled = !buzzersActive || buzzed;
   let btnStyle = { ...styles.buzzBtn };
@@ -312,7 +309,7 @@ export default function Buzzer() {
     btnStyle = { ...btnStyle, ...styles.buzzBtnDisabled };
     statusEl = <p style={styles.statusWaiting}>⏸ Waiting for buzzers to activate...</p>;
   } else if (buzzed && amFirst) {
-    statusEl = <div style={styles.statusFirst}>🎉 YOU'RE FIRST!</div>;
+    statusEl = <div style={styles.statusFirst}>🎉 YOU&apos;RE FIRST!</div>;
     btnStyle = { ...btnStyle, ...styles.buzzBtnFirst };
   } else if (buzzed && myPosition > 0) {
     statusEl = (
@@ -416,7 +413,6 @@ const styles = {
   },
   passwordBtn: {
     width: '100%',
-    maxWidth: '340px',
     padding: '18px',
     fontSize: '28px',
     fontFamily: '"Arial Black", Arial, sans-serif',
