@@ -13,18 +13,6 @@ export default function Buzzer() {
 
   const wakeLockRef = useRef(null);
 
-  const registeredKey = `buzzer_registered_${teamId}`;
-
-  const [registered, setRegistered] = useState(
-    () => teamId ? Boolean(localStorage.getItem(`buzzer_registered_${teamId}`)) : false
-  );
-
-  const [teamNameInput, setTeamNameInput] = useState("");
-  const [passwordInput, setPasswordInput] = useState("");
-
-  const [regError, setRegError] = useState("");
-  const [regChecking, setRegChecking] = useState(false);
-
   // ===============================
   // SOCKET CONNECT / RECONNECT
   // ===============================
@@ -61,27 +49,21 @@ export default function Buzzer() {
 
   useEffect(() => {
 
-    if (!registered) return;
-
     const interval = setInterval(() => {
-
       if (!gameState && socket.connected) {
         socket.emit("request_state");
       }
-
     }, 2000);
 
     return () => clearInterval(interval);
 
-  }, [registered, gameState]);
+  }, [gameState]);
 
   // ===============================
   // WAKE LOCK
   // ===============================
 
   useEffect(() => {
-
-    if (!registered) return;
 
     async function requestWakeLock() {
       try {
@@ -111,15 +93,13 @@ export default function Buzzer() {
       }
     };
 
-  }, [registered]);
+  }, []);
 
   // ===============================
   // GAME SOCKET EVENTS
   // ===============================
 
   useEffect(() => {
-
-    if (!registered) return;
 
     function onGameState(state) {
       setGameState(state);
@@ -170,7 +150,7 @@ export default function Buzzer() {
       socket.off("question_close", onQuestionClose);
     };
 
-  }, [registered]);
+  }, []);
 
   // ===============================
   // TEAM ID CHECK
@@ -179,9 +159,9 @@ export default function Buzzer() {
   if (!teamId) {
     return (
       <div style={styles.error}>
-        <h1 style={styles.errorTitle}>❌ Missing Team ID</h1>
+        <h1 style={styles.errorTitle}>❌ ID echipă lipsă</h1>
         <p style={styles.errorText}>
-          Open page as <code>/buzzer?team=team1</code>
+          Deschide pagina ca <code>/buzzer?team=team1</code>
         </p>
       </div>
     );
@@ -192,17 +172,28 @@ export default function Buzzer() {
   // ===============================
 
   if (!socket.connected) {
-    return <div style={styles.loading}>Connecting to server...</div>;
+    return <div style={styles.loading}>Se conectează la server...</div>;
   }
 
   if (!gameState) {
-    return <div style={styles.loading}>Loading game...</div>;
+    return <div style={styles.loading}>Se încarcă jocul...</div>;
   }
 
   const team = gameState.teams.find(t => t.id === teamId);
 
+  // ✅ FIX: arată un mesaj clar în loc de "Se conectează la server..."
   if (!team) {
-    return <div style={styles.loading}>Se conectează la server...</div>;
+    return (
+      <div style={styles.error}>
+        <h1 style={styles.errorTitle}>⚠️ Echipa nu a fost găsită</h1>
+        <p style={styles.errorText}>
+          ID-ul echipei <code style={{ background: "#333", padding: "2px 6px", borderRadius: 4 }}>{teamId}</code> nu există în joc.
+        </p>
+        <p style={styles.errorText}>
+          Verifică link-ul sau contactează organizatorul.
+        </p>
+      </div>
+    );
   }
 
   // ===============================
@@ -240,18 +231,18 @@ export default function Buzzer() {
 
   if (!buzzersActive && !buzzed) {
     btnStyle = { ...btnStyle, ...styles.buzzBtnDisabled };
-    statusEl = <p style={styles.statusWaiting}>⏸ Waiting...</p>;
+    statusEl = <p style={styles.statusWaiting}>⏸ Așteptați...</p>;
   }
 
   else if (buzzed && amFirst) {
-    statusEl = <div style={styles.statusFirst}>🎉 YOU'RE FIRST!</div>;
+    statusEl = <div style={styles.statusFirst}>🎉 PRIMUL!</div>;
     btnStyle = { ...btnStyle, ...styles.buzzBtnFirst };
   }
 
   else if (buzzed && myPosition > 0) {
     statusEl = (
       <div style={styles.statusNotFirst}>
-        ❌ {firstTeam ? firstTeam.name.toUpperCase() : "ANOTHER TEAM"} WAS FIRST
+        ❌ {firstTeam ? firstTeam.name.toUpperCase() : "ALTĂ ECHIPĂ"} A FOST PRIMA
       </div>
     );
   }
@@ -259,7 +250,7 @@ export default function Buzzer() {
   else if (buzzersActive) {
     statusEl = (
       <p style={{ color: "#4caf50", fontSize: "18px", textAlign: "center" }}>
-        🔔 BUZZERS ACTIVE
+        🔔 BUZZERE ACTIVE
       </p>
     );
   }
@@ -271,7 +262,7 @@ export default function Buzzer() {
         <h1 style={styles.teamName}>{team.name}</h1>
 
         <div style={styles.score}>
-          Score:
+          Scor:
           <span style={{ color: team.score < 0 ? "#ff6b6b" : "#FFD700" }}>
             {team.score < 0
               ? `-$${Math.abs(team.score)}`
@@ -286,7 +277,7 @@ export default function Buzzer() {
           onClick={handleBuzz}
           disabled={btnDisabled}
         >
-          {buzzed ? (amFirst ? "🎉 FIRST!" : "⏳") : "BUZZ"}
+          {buzzed ? (amFirst ? "🎉 PRIMUL!" : "⏳") : "BUZZ"}
         </button>
       </div>
 
@@ -296,7 +287,7 @@ export default function Buzzer() {
 
         {myPosition >= 0 && (
           <p style={{ color: "#aaa", fontSize: "16px" }}>
-            Position in queue: #{myPosition + 1}
+            Poziție în coadă: #{myPosition + 1}
           </p>
         )}
 
@@ -316,6 +307,29 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     fontSize: "28px"
+  },
+
+  error: {
+    minHeight: "100vh",
+    background: "#060ce9",
+    color: "#FFD700",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "20px",
+    textAlign: "center"
+  },
+
+  errorTitle: {
+    fontSize: "32px",
+    marginBottom: "16px"
+  },
+
+  errorText: {
+    color: "#ccc",
+    fontSize: "18px",
+    marginBottom: "8px"
   },
 
   page: {
