@@ -137,9 +137,17 @@ export default function Buzzer() {
       });
       const data = await res.json();
       if (data.ok) {
-        localStorage.setItem(registeredKey, name);
-        setRegistered(true);
-      } else {
+  localStorage.setItem(registeredKey, name);
+  setRegistered(true);
+
+  // important: cere imediat starea jocului după register
+  socket.emit('request_state');
+
+  // fallback: dacă tot nu se actualizează UI-ul, dă reload
+  setTimeout(() => {
+    window.location.reload();
+  }, 300);
+} else {
         setRegError(`❌ ${data.error || 'Înregistrare eșuată'}`);
       }
     } catch {
