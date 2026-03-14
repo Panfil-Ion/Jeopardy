@@ -31,9 +31,7 @@ app.use(cors());
 app.use(express.json());
 
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: '*' },
-});
+const io = new Server(server, { cors: { origin: '*' } });
 
 // Load or initialize game state
 let state = loadState();
@@ -46,8 +44,8 @@ app.use(express.static(publicDir));
 // RATE LIMITER
 // ===============================
 const rateLimitMap = new Map();
-const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX = 20; // max 20 attempts per minute per IP
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const RATE_LIMIT_MAX = 20;
 
 function rateLimitMiddleware(req, res, next) {
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
@@ -69,80 +67,77 @@ function rateLimitMiddleware(req, res, next) {
 }
 
 // ===============================
-// TEAM TOKEN AUTH (SERVER-ENFORCED)
+// TEAM AUTH + OWNER LOCK
 // ===============================
-// "last login wins": only one active token per team.
-// If someone logs in again for same team, old token becomes invalid.
-const teamTokens = new Map(); // teamId -> { token, issuedAt }
+// One device owns a team at a time.
+// Another device can only take over with force=true + correct password.
+const teamOwner = new Map(); // teamId -> { deviceId, token, issuedAt }
 
-function issueTeamToken(teamId) {
-  const token = crypto.randomBytes(24).toString('hex');
-  teamTokens.set(teamId, { token, issuedAt: Date.now() });
+function issueToken() {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+function setOwner(teamId, deviceId) {
+  const token = issueToken();
+  teamOwner.set(teamId, { deviceId, token, issuedAt: Date.now() });
   return token;
 }
 
-function isValidTeamToken(teamId, token) {
-  if (!teamId || !token) return false;
-  const entry = teamTokens.get(teamId);
-  if (!entry) return false;
-  return entry.token === token;
+function getOwner(teamId) {
+  return teamOwner.get(teamId) || null;
+}
+
+function validateTeamToken(teamId, deviceId, token) {
+  const owner = teamOwner.get(teamId);
+  if (!owner) return false;
+  return owner.deviceId === deviceId && owner.token === token;
 }
 
 // ===============================
 // ADMIN PASSWORD CHECK
 // ===============================
-
-// Password check endpoint (rate limited) — supports both GET (legacy) and POST
 app.get('/api/check-password', rateLimitMiddleware, (req, res) => {
   const { pass } = req.query;
-  if (pass === ADMIN_PASSWORD) {
-    res.json({ ok: true });
-  } else {
-    res.status(403).json({ ok: false });
-  }
+  if (pass === ADMIN_PASSWORD) res.json({ ok: true });
+  else res.status(403).json({ ok: false });
 });
 
 app.post('/api/check-password', rateLimitMiddleware, (req, res) => {
   const { pass } = req.body;
-  if (pass === ADMIN_PASSWORD) {
-    res.json({ ok: true });
-  } else {
-    res.status(403).json({ ok: false });
-  }
+  if (pass === ADMIN_PASSWORD) res.json({ ok: true });
+  else res.status(403).json({ ok: false });
 });
 
 // ===============================
-// TEAM PASSWORD CHECK (OPTIONAL/LEGACY)
-// ===============================
-app.get('/api/check-team-password', rateLimitMiddleware, (req, res) => {
-  const { team, pass } = req.query;
-  const expected = TEAM_PASSWORDS[team];
-  if (!expected) return res.status(404).json({ ok: false, error: 'Team not found' });
-  if (pass === expected) {
-    res.json({ ok: true });
-  } else {
-    res.status(403).json({ ok: false });
-  }
-});
-
-// ===============================
-// TEAM LOGIN (NEW): returns token
+// TEAM LOGIN (LOCKED)
 // ===============================
 app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
-  const { teamId, password, teamName } = req.body;
+  const { teamId, password, teamName, deviceId, force } = req.body;
+
+  if (!deviceId) return res.status(400).json({ ok: false, error: 'Missing deviceId' });
 
   const expected = TEAM_PASSWORDS[teamId];
   if (!expected) return res.status(404).json({ ok: false, error: 'Team slot not found' });
   if (password !== expected) return res.status(403).json({ ok: false, error: 'Wrong password' });
 
-  // Ensure team exists in state. If not, auto-register it.
+  const existingOwner = getOwner(teamId);
+
+  // If team is owned by another device and no force takeover -> deny
+  if (existingOwner && existingOwner.deviceId !== deviceId && !force) {
+    return res.status(409).json({
+      ok: false,
+      error: 'Team already in use on another device',
+      code: 'TEAM_IN_USE',
+    });
+  }
+
+  // Ensure team exists in state (auto-register if missing)
   if (!state.teams.find(t => t.id === teamId)) {
     const name = (teamName || '').trim() || teamId;
     state.teams.push({ id: teamId, name, score: 0 });
     saveState(state);
     io.emit('game_state', state);
   } else {
-    // Optional: update team name if provided (only if non-empty)
     const name = (teamName || '').trim();
     if (name) {
       state.teams = state.teams.map(t => (t.id === teamId ? { ...t, name } : t));
@@ -151,27 +146,28 @@ app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
     }
   }
 
-  const token = issueTeamToken(teamId);
+  // Set/replace owner (also works for same device re-login)
+  const token = setOwner(teamId, deviceId);
+
+  // notify clients (optional)
+  io.emit('team_owner_changed', { teamId });
+
   res.json({ ok: true, token });
 });
 
-// ===============================
-// KEEP register-team for compatibility (optional)
-// ===============================
-// You can still keep this endpoint; Buzzer will use /api/team-login now.
-app.post('/api/register-team', rateLimitMiddleware, (req, res) => {
-  const { teamId, teamName, password } = req.body;
-  const expected = TEAM_PASSWORDS[teamId];
-  if (!expected) return res.status(404).json({ ok: false, error: 'Team slot not found' });
-  if (password !== expected) return res.status(403).json({ ok: false, error: 'Wrong password' });
-  if (state.teams.find(t => t.id === teamId)) {
+// Optional: release team (nice to have)
+app.post('/api/team-logout', rateLimitMiddleware, (req, res) => {
+  const { teamId, deviceId, token } = req.body;
+  const owner = getOwner(teamId);
+  if (!owner) return res.json({ ok: true });
+
+  if (owner.deviceId === deviceId && owner.token === token) {
+    teamOwner.delete(teamId);
+    io.emit('team_owner_changed', { teamId });
     return res.json({ ok: true });
   }
-  const name = (teamName || '').trim() || teamId;
-  state.teams.push({ id: teamId, name, score: 0 });
-  saveState(state);
-  io.emit('game_state', state);
-  res.json({ ok: true });
+
+  return res.status(403).json({ ok: false, error: 'Unauthorized' });
 });
 
 // ===============================
@@ -193,7 +189,6 @@ app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res
 const spaIndexFile = path.join(publicDir, 'index.html');
 const spaIndexContent = fs.existsSync(spaIndexFile) ? fs.readFileSync(spaIndexFile, 'utf8') : null;
 
-// Fallback to index.html for SPA routing
 app.get('*', (req, res) => {
   if (spaIndexContent) {
     res.setHeader('Content-Type', 'text/html');
@@ -209,15 +204,12 @@ app.get('*', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  // Send current state to newly connected client
   socket.emit('game_state', state);
 
-  // Client can re-request state at any time
   socket.on('request_state', () => {
     socket.emit('game_state', state);
   });
 
-  // GM selects a question
   socket.on('select_question', ({ questionId }) => {
     const question = state.questions.find(q => q.id === questionId);
     if (!question || question.used) return;
@@ -225,7 +217,6 @@ io.on('connection', (socket) => {
     state.currentQuestion = question;
     state.answerRevealed = false;
 
-    // activate buzzers only if not practical
     if (question.isPracticalTask) {
       state.buzzersActive = false;
       state.buzzerQueue = [];
@@ -246,7 +237,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM closes question without judging
   socket.on('close_question', () => {
     if (state.currentQuestion) {
       state.questions = state.questions.map(q =>
@@ -264,7 +254,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM activates buzzers
   socket.on('activate_buzzers', () => {
     state.buzzersActive = true;
     state.buzzerQueue = resetQueue();
@@ -275,7 +264,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM resets buzzers
   socket.on('reset_buzzers', () => {
     state.buzzersActive = false;
     state.buzzerQueue = resetQueue();
@@ -286,11 +274,11 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // Team buzzes in (NOW TOKEN-PROTECTED)
-  socket.on('buzz', ({ teamId, timestamp, token }) => {
+  // TOKEN + OWNER protected buzz
+  socket.on('buzz', ({ teamId, deviceId, token, timestamp }) => {
     if (!state.buzzersActive) return;
 
-    if (!isValidTeamToken(teamId, token)) {
+    if (!validateTeamToken(teamId, deviceId, token)) {
       socket.emit('buzz_denied', { teamId, reason: 'unauthorized' });
       return;
     }
@@ -308,7 +296,6 @@ io.on('connection', (socket) => {
     }
   });
 
-  // GM judges answer
   socket.on('judge_answer', ({ correct, teamId }) => {
     if (!state.currentQuestion) return;
 
@@ -326,9 +313,7 @@ io.on('connection', (socket) => {
       state.answerRevealed = false;
       state.timerActive = false;
     } else {
-      if (!isPractical) {
-        state.teams = subtractPoints(state.teams, teamId, points);
-      }
+      if (!isPractical) state.teams = subtractPoints(state.teams, teamId, points);
       state.buzzerQueue = nextTeam(state.buzzerQueue);
     }
 
@@ -339,12 +324,9 @@ io.on('connection', (socket) => {
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('game_state', state);
 
-    if (correct) {
-      io.emit('question_close');
-    }
+    if (correct) io.emit('question_close');
   });
 
-  // GM adjusts score manually
   socket.on('adjust_score', ({ teamId, delta }) => {
     state.teams = adjustScore(state.teams, teamId, delta);
     saveState(state);
@@ -353,7 +335,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM starts timer
   socket.on('start_timer', ({ seconds }) => {
     state.timerActive = true;
     state.timerSeconds = seconds || 15;
@@ -363,7 +344,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM stops timer
   socket.on('stop_timer', () => {
     state.timerActive = false;
     saveState(state);
@@ -372,7 +352,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM reveals answer
   socket.on('reveal_answer', () => {
     state.answerRevealed = true;
     saveState(state);
@@ -381,7 +360,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM moves to next team
   socket.on('next_team', () => {
     state.buzzerQueue = nextTeam(state.buzzerQueue);
     saveState(state);
@@ -390,7 +368,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM resets the entire game
   socket.on('reset_game', () => {
     state = resetState();
     saveState(state);
@@ -400,8 +377,7 @@ io.on('connection', (socket) => {
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('score_update', state.teams);
 
-    // optional: also clear team tokens on reset
-    teamTokens.clear();
+    teamOwner.clear();
   });
 
   socket.on('disconnect', () => {
