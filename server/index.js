@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const fs = require('fs');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
@@ -41,7 +42,9 @@ let state = loadState();
 const publicDir = path.join(__dirname, 'public');
 app.use(express.static(publicDir));
 
-// Simple in-memory rate limiter for the password endpoint
+// ===============================
+// RATE LIMITER
+// ===============================
 const rateLimitMap = new Map();
 const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
 const RATE_LIMIT_MAX = 20; // max 20 attempts per minute per IP
@@ -65,6 +68,30 @@ function rateLimitMiddleware(req, res, next) {
   next();
 }
 
+// ===============================
+// TEAM TOKEN AUTH (SERVER-ENFORCED)
+// ===============================
+// "last login wins": only one active token per team.
+// If someone logs in again for same team, old token becomes invalid.
+const teamTokens = new Map(); // teamId -> { token, issuedAt }
+
+function issueTeamToken(teamId) {
+  const token = crypto.randomBytes(24).toString('hex');
+  teamTokens.set(teamId, { token, issuedAt: Date.now() });
+  return token;
+}
+
+function isValidTeamToken(teamId, token) {
+  if (!teamId || !token) return false;
+  const entry = teamTokens.get(teamId);
+  if (!entry) return false;
+  return entry.token === token;
+}
+
+// ===============================
+// ADMIN PASSWORD CHECK
+// ===============================
+
 // Password check endpoint (rate limited) — supports both GET (legacy) and POST
 app.get('/api/check-password', rateLimitMiddleware, (req, res) => {
   const { pass } = req.query;
@@ -84,7 +111,9 @@ app.post('/api/check-password', rateLimitMiddleware, (req, res) => {
   }
 });
 
-// Team buzzer password check endpoint (rate limited)
+// ===============================
+// TEAM PASSWORD CHECK (OPTIONAL/LEGACY)
+// ===============================
 app.get('/api/check-team-password', rateLimitMiddleware, (req, res) => {
   const { team, pass } = req.query;
   const expected = TEAM_PASSWORDS[team];
@@ -96,7 +125,40 @@ app.get('/api/check-team-password', rateLimitMiddleware, (req, res) => {
   }
 });
 
-// Team registration endpoint (rate limited)
+// ===============================
+// TEAM LOGIN (NEW): returns token
+// ===============================
+app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
+  const { teamId, password, teamName } = req.body;
+
+  const expected = TEAM_PASSWORDS[teamId];
+  if (!expected) return res.status(404).json({ ok: false, error: 'Team slot not found' });
+  if (password !== expected) return res.status(403).json({ ok: false, error: 'Wrong password' });
+
+  // Ensure team exists in state. If not, auto-register it.
+  if (!state.teams.find(t => t.id === teamId)) {
+    const name = (teamName || '').trim() || teamId;
+    state.teams.push({ id: teamId, name, score: 0 });
+    saveState(state);
+    io.emit('game_state', state);
+  } else {
+    // Optional: update team name if provided (only if non-empty)
+    const name = (teamName || '').trim();
+    if (name) {
+      state.teams = state.teams.map(t => (t.id === teamId ? { ...t, name } : t));
+      saveState(state);
+      io.emit('game_state', state);
+    }
+  }
+
+  const token = issueTeamToken(teamId);
+  res.json({ ok: true, token });
+});
+
+// ===============================
+// KEEP register-team for compatibility (optional)
+// ===============================
+// You can still keep this endpoint; Buzzer will use /api/team-login now.
 app.post('/api/register-team', rateLimitMiddleware, (req, res) => {
   const { teamId, teamName, password } = req.body;
   const expected = TEAM_PASSWORDS[teamId];
@@ -112,7 +174,9 @@ app.post('/api/register-team', rateLimitMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
-
+// ===============================
+// UPDATE QUESTIONS
+// ===============================
 app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res) => {
   const { questions, pass } = req.body;
   if (pass !== ADMIN_PASSWORD) return res.status(403).json({ ok: false, error: 'Unauthorized' });
@@ -123,7 +187,9 @@ app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res
   res.json({ ok: true });
 });
 
-
+// ===============================
+// SPA FALLBACK
+// ===============================
 const spaIndexFile = path.join(publicDir, 'index.html');
 const spaIndexContent = fs.existsSync(spaIndexFile) ? fs.readFileSync(spaIndexFile, 'utf8') : null;
 
@@ -137,6 +203,9 @@ app.get('*', (req, res) => {
   }
 });
 
+// ===============================
+// SOCKET.IO
+// ===============================
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
@@ -149,35 +218,33 @@ io.on('connection', (socket) => {
   });
 
   // GM selects a question
-  // GM selects a question
-socket.on('select_question', ({ questionId }) => {
-  const question = state.questions.find(q => q.id === questionId);
-  if (!question || question.used) return;
+  socket.on('select_question', ({ questionId }) => {
+    const question = state.questions.find(q => q.id === questionId);
+    if (!question || question.used) return;
 
-  state.currentQuestion = question;
-  state.answerRevealed = false;
-  
-  // AICI: activează buzzerele doar dacă nu e practică
-  if (question.isPracticalTask) {
-    state.buzzersActive = false;
-    state.buzzerQueue = []; // sau poti folosi resetQueue()
-  } else {
-    state.buzzersActive = true;
-    state.buzzerQueue = resetQueue();
-  }
+    state.currentQuestion = question;
+    state.answerRevealed = false;
 
-  state.timerActive = false;
-  saveState(state);
+    // activate buzzers only if not practical
+    if (question.isPracticalTask) {
+      state.buzzersActive = false;
+      state.buzzerQueue = [];
+    } else {
+      state.buzzersActive = true;
+      state.buzzerQueue = resetQueue();
+    }
 
-  io.emit('question_open', question);
+    state.timerActive = false;
+    saveState(state);
 
-  // Trimite evenimentele doar dacă nu e practică
-  if (!question.isPracticalTask) {
-    io.emit('buzzer_activated');
-    io.emit('buzzer_update', state.buzzerQueue);
-  }
-  io.emit('game_state', state);
-});
+    io.emit('question_open', question);
+
+    if (!question.isPracticalTask) {
+      io.emit('buzzer_activated');
+      io.emit('buzzer_update', state.buzzerQueue);
+    }
+    io.emit('game_state', state);
+  });
 
   // GM closes question without judging
   socket.on('close_question', () => {
@@ -219,9 +286,14 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
-  // Team buzzes in
-  socket.on('buzz', ({ teamId, timestamp }) => {
+  // Team buzzes in (NOW TOKEN-PROTECTED)
+  socket.on('buzz', ({ teamId, timestamp, token }) => {
     if (!state.buzzersActive) return;
+
+    if (!isValidTeamToken(teamId, token)) {
+      socket.emit('buzz_denied', { teamId, reason: 'unauthorized' });
+      return;
+    }
 
     const team = state.teams.find(t => t.id === teamId);
     if (!team) return;
@@ -237,7 +309,7 @@ socket.on('select_question', ({ questionId }) => {
   });
 
   // GM judges answer
-  socket.on('judge_answer', ({ correct, teamId, deductPoints }) => {
+  socket.on('judge_answer', ({ correct, teamId }) => {
     if (!state.currentQuestion) return;
 
     const points = state.currentQuestion.points;
@@ -254,11 +326,9 @@ socket.on('select_question', ({ questionId }) => {
       state.answerRevealed = false;
       state.timerActive = false;
     } else {
-      // For practical tasks, wrong answer does NOT deduct points
       if (!isPractical) {
         state.teams = subtractPoints(state.teams, teamId, points);
       }
-      // Move to next team in queue
       state.buzzerQueue = nextTeam(state.buzzerQueue);
     }
 
@@ -329,6 +399,9 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('question_close');
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('score_update', state.teams);
+
+    // optional: also clear team tokens on reset
+    teamTokens.clear();
   });
 
   socket.on('disconnect', () => {
