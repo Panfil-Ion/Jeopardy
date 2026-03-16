@@ -1,18 +1,13 @@
 import { useState, useEffect } from 'react';
 import socket from '../socket.js';
 import Board from '../components/Board.jsx';
-import Scoreboard from '../components/Scoreboard.jsx';
 import BuzzerQueue from '../components/BuzzerQueue.jsx';
-import QuestionModal from '../components/QuestionModal.jsx';
 import AdminPasswordGate from '../components/AdminPasswordGate.jsx';
 
 export default function Control() {
   const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [adjustAmounts, setAdjustAmounts] = useState({});
-
-  // NEW: practical task per-question pending teams (local UI state)
-
 
   // Always set up socket listeners (independent of auth state)
   useEffect(() => {
@@ -30,10 +25,6 @@ export default function Control() {
     }
     function onQuestionClose() {
       setGameState(prev => (prev ? { ...prev, currentQuestion: null, answerRevealed: false, timerActive: false } : prev));
-
-      // reset local practical UI state
-      setPendingPracticalTeamIds([]);
-      setPendingQuestionId(null);
     }
     function onAnswerRevealed() {
       setGameState(prev => (prev ? { ...prev, answerRevealed: true } : prev));
@@ -78,21 +69,6 @@ export default function Control() {
     };
   }, []);
 
-  // NEW: when a practical question opens, initialize pending teams ONCE for that question
-  useEffect(() => {
-    if (!gameState?.currentQuestion) return;
-    if (!gameState.currentQuestion.isPracticalTask) return;
-
-    const qid = gameState.currentQuestion.id;
-
-    // if we already initialized for this question, do nothing
-    if (pendingQuestionId === qid && pendingPracticalTeamIds.length > 0) return;
-
-    // initialize pending list with all current teams
-    setPendingQuestionId(qid);
-    setPendingPracticalTeamIds(gameState.teams.map(t => t.id));
-  }, [gameState?.currentQuestion?.id, gameState?.currentQuestion?.isPracticalTask, gameState?.teams, pendingQuestionId, pendingPracticalTeamIds.length]);
-
   if (!authorized) {
     return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
   }
@@ -121,40 +97,7 @@ export default function Control() {
     return parseInt(adjustAmounts[teamId] || 100, 10) || 100;
   }
 
-  // NEW: practical judge helpers
-  function practicalMarkTeamDone(teamId) {
-    setPendingPracticalTeamIds(prev => prev.filter(id => id !== teamId));
-  }
-
-  function practicalFinalizeIfDone(nextPendingIds) {
-    if (nextPendingIds.length === 0) {
-      socket.emit('close_question');
-    }
-  }
-
-  function practicalGivePoints(teamId, points) {
-    socket.emit('adjust_score', { teamId, delta: points });
-
-    setPendingPracticalTeamIds(prev => {
-      const next = prev.filter(id => id !== teamId);
-      practicalFinalizeIfDone(next);
-      return next;
-    });
-  }
-
-  function practicalSkip(teamId) {
-    // no score change
-    setPendingPracticalTeamIds(prev => {
-      const next = prev.filter(id => id !== teamId);
-      practicalFinalizeIfDone(next);
-      return next;
-    });
-  }
-
-  const practicalTeamsToShow =
-    currentQuestion?.isPracticalTask
-      ? teams.filter(t => pendingPracticalTeamIds.includes(t.id))
-      : [];
+  const practicalPending = Array.isArray(gameState.practicalPendingTeamIds) ? gameState.practicalPendingTeamIds : [];
 
   return (
     <div style={styles.page}>
@@ -166,12 +109,12 @@ export default function Control() {
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>📋 Question Board</h2>
             <Board
-  questions={questions}
-  onSelectQuestion={currentQuestion ? null : handleSelectQuestion}
-  isControl={true}
-  isDisplay={false}
-  hidesPractice={false}
-/>
+              questions={questions}
+              onSelectQuestion={currentQuestion ? null : handleSelectQuestion}
+              isControl={true}
+              isDisplay={false}
+              hidesPractice={false}
+            />
           </div>
         </div>
 
@@ -182,7 +125,12 @@ export default function Control() {
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>
                 {currentQuestion.isPracticalTask ? '🔧 PRACTICAL TASK' : '❓ Current Question'}
-                <span style={{ ...styles.pointsBadge, background: currentQuestion.isPracticalTask ? '#b85c00' : '#060ce9' }}>
+                <span
+                  style={{
+                    ...styles.pointsBadge,
+                    background: currentQuestion.isPracticalTask ? '#b85c00' : '#060ce9',
+                  }}
+                >
                   ${currentQuestion.points}
                 </span>
               </h2>
@@ -198,42 +146,55 @@ export default function Control() {
 
               {/* Judge buttons — practical vs normal */}
               {currentQuestion.isPracticalTask ? (
-  <div style={styles.judgeSection}>
-    <div style={{ color: '#FFA500', fontSize: '14px', marginBottom: '8px', fontWeight: 'bold' }}>
-      🔧 Judecată Practică — fiecare echipă dispare după + sau Skip. Persistă și după refresh.
-    </div>
+                <div style={styles.judgeSection}>
+                  <div style={{ color: '#FFA500', fontSize: '14px', marginBottom: '8px', fontWeight: 'bold' }}>
+                    🔧 Judecată Practică — fiecare echipă dispare după + sau Skip. Persistă și după refresh.
+                  </div>
 
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      {teams
-        .filter(t => (gameState.practicalPendingTeamIds || []).includes(t.id))
-        .map(team => (
-          <div
-            key={team.id}
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px', background: '#0d0d3a', borderRadius: '4px' }}
-          >
-            <span style={{ flex: 1, color: 'white', fontSize: '13px' }}>{team.name}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {teams
+                      .filter(t => practicalPending.includes(t.id))
+                      .map(team => (
+                        <div
+                          key={team.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            padding: '6px',
+                            background: '#0d0d3a',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          <span style={{ flex: 1, color: 'white', fontSize: '13px' }}>{team.name}</span>
 
-            <button
-              style={{ ...styles.correctBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
-              onClick={() => {
-                socket.emit('adjust_score', { teamId: team.id, delta: currentQuestion.points });
-                socket.emit('practical_mark_team_done', { teamId: team.id });
-              }}
-            >
-              ✅ +${currentQuestion.points}
-            </button>
+                          <button
+                            style={{ ...styles.correctBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
+                            onClick={() => {
+                              socket.emit('adjust_score', { teamId: team.id, delta: currentQuestion.points });
+                              socket.emit('practical_mark_team_done', { teamId: team.id });
+                            }}
+                          >
+                            ✅ +${currentQuestion.points}
+                          </button>
 
-            <button
-              style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px', background: '#555' }}
-              onClick={() => socket.emit('practical_mark_team_done', { teamId: team.id })}
-            >
-              ⏭ Skip (0 pts)
-            </button>
-          </div>
-        ))}
-    </div>
-  </div>
-) : firstInQueue ? (
+                          <button
+                            style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px', background: '#555' }}
+                            onClick={() => socket.emit('practical_mark_team_done', { teamId: team.id })}
+                          >
+                            ⏭ Skip (0 pts)
+                          </button>
+                        </div>
+                      ))}
+
+                    {practicalPending.length === 0 && (
+                      <div style={{ color: '#aaa', fontSize: '13px' }}>
+                        Nicio echipă în așteptare (ar trebui să se închidă automat).
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : firstInQueue ? (
                 <div style={styles.judgeSection}>
                   <div style={styles.activeTeam}>
                     Answering:{' '}
@@ -248,7 +209,9 @@ export default function Control() {
                     </button>
                   </div>
                 </div>
-              ) : null}
+              ) : (
+                <div style={{ color: '#aaa', marginBottom: '10px' }}>Nicio echipă nu a buzz-uit încă.</div>
+              )}
 
               {/* Timer controls */}
               <div style={styles.controlRow}>
@@ -331,10 +294,16 @@ export default function Control() {
                     onChange={e => setAdjustAmounts(prev => ({ ...prev, [team.id]: e.target.value }))}
                     style={styles.adjustInput}
                   />
-                  <button style={{ ...styles.smallBtn, background: '#1a5c1a' }} onClick={() => handleAdjustScore(team.id, getAdjustAmount(team.id))}>
+                  <button
+                    style={{ ...styles.smallBtn, background: '#1a5c1a' }}
+                    onClick={() => handleAdjustScore(team.id, getAdjustAmount(team.id))}
+                  >
                     +
                   </button>
-                  <button style={{ ...styles.smallBtn, background: '#7a1a1a' }} onClick={() => handleAdjustScore(team.id, -getAdjustAmount(team.id))}>
+                  <button
+                    style={{ ...styles.smallBtn, background: '#7a1a1a' }}
+                    onClick={() => handleAdjustScore(team.id, -getAdjustAmount(team.id))}
+                  >
                     −
                   </button>
                 </div>
