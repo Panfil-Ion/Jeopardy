@@ -186,6 +186,7 @@ app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res
 // ===============================
 // SPA FALLBACK
 // ===============================
+const { loadState, saveState, resetState, saveQuestionsToFile } = require('./gameState');
 const spaIndexFile = path.join(publicDir, 'index.html');
 const spaIndexContent = fs.existsSync(spaIndexFile) ? fs.readFileSync(spaIndexFile, 'utf8') : null;
 
