@@ -210,32 +210,39 @@ io.on('connection', (socket) => {
     socket.emit('game_state', state);
   });
 
-  socket.on('select_question', ({ questionId }) => {
-    const question = state.questions.find(q => q.id === questionId);
-    if (!question || question.used) return;
+  // inside io.on('connection', ...) replace/select_question handler with this guard:
+socket.on('select_question', ({ questionId }) => {
+  // NEW: do not allow selecting another question while one is open
+  if (state.currentQuestion) return;
 
-    state.currentQuestion = question;
-    state.answerRevealed = false;
+  const question = state.questions.find(q => q.id === questionId);
+  if (!question || question.used) return;
 
-    if (question.isPracticalTask) {
-      state.buzzersActive = false;
-      state.buzzerQueue = [];
-    } else {
-      state.buzzersActive = true;
-      state.buzzerQueue = resetQueue();
-    }
+  state.currentQuestion = question;
+  state.answerRevealed = false;
 
-    state.timerActive = false;
-    saveState(state);
+  if (question.isPracticalTask) {
+    state.buzzersActive = false;
+    state.buzzerQueue = [];
 
-    io.emit('question_open', question);
+    // NEW: initialize practical pending teams (persisted)
+    state.practicalPendingTeamIds = (state.teams || []).map(t => t.id);
+  } else {
+    state.buzzersActive = true;
+    state.buzzerQueue = resetQueue();
+  }
 
-    if (!question.isPracticalTask) {
-      io.emit('buzzer_activated');
-      io.emit('buzzer_update', state.buzzerQueue);
-    }
-    io.emit('game_state', state);
-  });
+  state.timerActive = false;
+  saveState(state);
+
+  io.emit('question_open', question);
+
+  if (!question.isPracticalTask) {
+    io.emit('buzzer_activated');
+    io.emit('buzzer_update', state.buzzerQueue);
+  }
+  io.emit('game_state', state);
+});
 
   socket.on('close_question', () => {
     if (state.currentQuestion) {
