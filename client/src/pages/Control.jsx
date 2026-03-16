@@ -8,7 +8,6 @@ export default function Control() {
   const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [adjustAmounts, setAdjustAmounts] = useState({});
-  const [timerInput, setTimerInput] = useState(15);
 
   useEffect(() => {
     function onGameState(state) {
@@ -24,7 +23,7 @@ export default function Control() {
       setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
     }
     function onQuestionClose() {
-      setGameState(prev => (prev ? { ...prev, currentQuestion: null, answerRevealed: false, timerActive: false } : prev));
+      setGameState(prev => (prev ? { ...prev, currentQuestion: null, answerRevealed: false } : prev));
     }
     function onAnswerRevealed() {
       setGameState(prev => (prev ? { ...prev, answerRevealed: true } : prev));
@@ -35,12 +34,6 @@ export default function Control() {
     function onBuzzerDeactivated() {
       setGameState(prev => (prev ? { ...prev, buzzersActive: false } : prev));
     }
-    function onTimerStart({ seconds }) {
-      setGameState(prev => (prev ? { ...prev, timerActive: true, timerSeconds: seconds } : prev));
-    }
-    function onTimerStop() {
-      setGameState(prev => (prev ? { ...prev, timerActive: false } : prev));
-    }
 
     socket.on('game_state', onGameState);
     socket.on('buzzer_update', onBuzzerUpdate);
@@ -50,8 +43,6 @@ export default function Control() {
     socket.on('answer_revealed', onAnswerRevealed);
     socket.on('buzzer_activated', onBuzzerActivated);
     socket.on('buzzer_deactivated', onBuzzerDeactivated);
-    socket.on('timer_start', onTimerStart);
-    socket.on('timer_stop', onTimerStop);
 
     socket.emit('request_state');
 
@@ -64,8 +55,6 @@ export default function Control() {
       socket.off('answer_revealed', onAnswerRevealed);
       socket.off('buzzer_activated', onBuzzerActivated);
       socket.off('buzzer_deactivated', onBuzzerDeactivated);
-      socket.off('timer_start', onTimerStart);
-      socket.off('timer_stop', onTimerStop);
     };
   }, []);
 
@@ -98,18 +87,11 @@ export default function Control() {
     return parseInt(adjustAmounts[teamId] || 100, 10) || 100;
   }
 
-  function startTimer() {
-    const seconds = Number(timerInput);
-    if (!Number.isFinite(seconds) || seconds <= 0) return;
-    socket.emit('start_timer', { seconds });
-  }
-
   return (
     <div style={styles.page}>
       <h1 style={styles.title}>🎮 GAME MASTER CONTROL</h1>
 
       <div style={styles.layout}>
-        {/* Left: Board */}
         <div style={styles.leftCol}>
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>📋 Question Board</h2>
@@ -123,9 +105,7 @@ export default function Control() {
           </div>
         </div>
 
-        {/* Right: Controls */}
         <div style={styles.rightCol}>
-          {/* Current Question Panel */}
           {currentQuestion ? (
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>
@@ -144,7 +124,6 @@ export default function Control() {
                 </div>
               </div>
 
-              {/* Judge buttons — practical vs normal */}
               {currentQuestion.isPracticalTask ? (
                 <div style={styles.judgeSection}>
                   <div style={{ color: '#FFA500', fontSize: '14px', marginBottom: '8px', fontWeight: 'bold' }}>
@@ -202,44 +181,14 @@ export default function Control() {
                       ❌ Wrong (-${currentQuestion.points})
                     </button>
                   </div>
+                  <div style={{ color: '#aaa', fontSize: '12px' }}>
+                    Timerul pornește automat când prima echipă apasă buzzer. La timeout scade automat punctele și trece la următoarea echipă.
+                  </div>
                 </div>
               ) : (
                 <div style={{ color: '#aaa', marginBottom: '10px' }}>Nicio echipă nu a buzz-uit încă.</div>
               )}
 
-              {/* Timer controls (manual seconds input) */}
-              <div style={styles.controlRow}>
-                <input
-                  type="number"
-                  min="1"
-                  value={timerInput}
-                  onChange={e => setTimerInput(e.target.value)}
-                  style={{
-                    width: '110px',
-                    padding: '8px',
-                    borderRadius: '6px',
-                    border: '1px solid #444',
-                    background: '#222',
-                    color: 'white',
-                    fontSize: '13px',
-                    textAlign: 'center',
-                    fontFamily: '"Arial Black", Arial, sans-serif',
-                  }}
-                />
-                <button
-                  style={{ ...styles.btn, background: '#1a3a7a' }}
-                  onClick={startTimer}
-                  disabled={currentQuestion.isPracticalTask}
-                  title={currentQuestion.isPracticalTask ? 'Timer disabled for practical tasks' : ''}
-                >
-                  ▶️ Start Timer
-                </button>
-                <button style={{ ...styles.btn, background: '#555' }} onClick={() => socket.emit('stop_timer')}>
-                  ⏹ Stop Timer
-                </button>
-              </div>
-
-              {/* Buzzer controls */}
               <div style={styles.controlRow}>
                 <button
                   style={{ ...styles.btn, background: buzzersActive ? '#555' : '#1a5c1a' }}
@@ -253,11 +202,10 @@ export default function Control() {
                 </button>
               </div>
 
-              {/* Reveal & Next */}
               <div style={styles.controlRow}>
                 {!answerRevealed && (
                   <button style={{ ...styles.btn, background: '#1a3a7a' }} onClick={() => socket.emit('reveal_answer')}>
-                    👁 Reveal Answer
+                    �� Reveal Answer
                   </button>
                 )}
                 {buzzerQueue.length > 1 && (
@@ -277,14 +225,10 @@ export default function Control() {
             </div>
           )}
 
-          {/* Buzzer Queue */}
           <div style={styles.section}>
             <BuzzerQueue queue={buzzerQueue} teams={teams} />
             <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-              <button
-                style={{ ...styles.btn, flex: 1, background: buzzersActive ? '#555' : '#1a5c1a' }}
-                onClick={() => socket.emit('activate_buzzers')}
-              >
+              <button style={{ ...styles.btn, flex: 1, background: buzzersActive ? '#555' : '#1a5c1a' }} onClick={() => socket.emit('activate_buzzers')}>
                 🔔 Activate Buzzers
               </button>
               <button style={{ ...styles.btn, flex: 1, background: '#7a1a1a' }} onClick={() => socket.emit('reset_buzzers')}>
@@ -293,7 +237,6 @@ export default function Control() {
             </div>
           </div>
 
-          {/* Scoreboard + Manual Adjust */}
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>🏆 Scores & Adjustments</h2>
             <div style={styles.scoreList}>
@@ -321,7 +264,6 @@ export default function Control() {
             </div>
           </div>
 
-          {/* Reset game */}
           <div style={styles.section}>
             <button
               style={{ ...styles.btn, background: '#3a0000', width: '100%', color: '#ff6b6b' }}
