@@ -199,50 +199,42 @@ export default function Control() {
 
               {/* Judge buttons — practical vs normal */}
               {currentQuestion.isPracticalTask ? (
-                <div style={styles.judgeSection}>
-                  <div style={{ color: '#FFA500', fontSize: '14px', marginBottom: '8px', fontWeight: 'bold' }}>
-                    🔧 Judecată Practică — fiecare echipă trebuie evaluată. Întrebarea se închide doar după ce ai terminat toate echipele.
-                  </div>
+  <div style={styles.judgeSection}>
+    <div style={{ color: '#FFA500', fontSize: '14px', marginBottom: '8px', fontWeight: 'bold' }}>
+      🔧 Judecată Practică — fiecare echipă dispare după + sau Skip. Persistă și după refresh.
+    </div>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {practicalTeamsToShow.map(team => (
-                      <div
-                        key={team.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '6px',
-                          background: '#0d0d3a',
-                          borderRadius: '4px',
-                        }}
-                      >
-                        <span style={{ flex: 1, color: 'white', fontSize: '13px' }}>{team.name}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {teams
+        .filter(t => (gameState.practicalPendingTeamIds || []).includes(t.id))
+        .map(team => (
+          <div
+            key={team.id}
+            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px', background: '#0d0d3a', borderRadius: '4px' }}
+          >
+            <span style={{ flex: 1, color: 'white', fontSize: '13px' }}>{team.name}</span>
 
-                        <button
-                          style={{ ...styles.correctBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
-                          onClick={() => practicalGivePoints(team.id, currentQuestion.points)}
-                        >
-                          ✅ +${currentQuestion.points}
-                        </button>
+            <button
+              style={{ ...styles.correctBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
+              onClick={() => {
+                socket.emit('adjust_score', { teamId: team.id, delta: currentQuestion.points });
+                socket.emit('practical_mark_team_done', { teamId: team.id });
+              }}
+            >
+              ✅ +${currentQuestion.points}
+            </button>
 
-                        <button
-                          style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px', background: '#555' }}
-                          onClick={() => practicalSkip(team.id)}
-                        >
-                          ⏭ Skip (0 pts)
-                        </button>
-                      </div>
-                    ))}
-
-                    {practicalTeamsToShow.length === 0 && (
-                      <div style={{ color: '#aaa', fontSize: '13px', padding: '6px' }}>
-                        ✅ Toate echipele au fost procesate. (Se închide întrebarea…)
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : firstInQueue ? (
+            <button
+              style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px', background: '#555' }}
+              onClick={() => socket.emit('practical_mark_team_done', { teamId: team.id })}
+            >
+              ⏭ Skip (0 pts)
+            </button>
+          </div>
+        ))}
+    </div>
+  </div>
+) : firstInQueue ? (
                 <div style={styles.judgeSection}>
                   <div style={styles.activeTeam}>
                     Answering:{' '}
