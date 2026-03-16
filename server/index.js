@@ -178,6 +178,7 @@ app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res
   if (pass !== ADMIN_PASSWORD) return res.status(403).json({ ok: false, error: 'Unauthorized' });
   if (!Array.isArray(questions)) return res.status(400).json({ ok: false });
   state.questions = questions;
+  saveQuestionsToFile(questions);
   saveState(state);
   io.emit('game_state', state);
   res.json({ ok: true });
