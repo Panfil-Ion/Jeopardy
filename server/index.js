@@ -36,6 +36,10 @@ const io = new Server(server, { cors: { origin: '*' } });
 // Load or initialize game state
 let state = loadState();
 
+// Ensure timer flags exist (backward compatible with old saved state)
+if (typeof state.timerEnabled !== 'boolean') state.timerEnabled = false;
+if (typeof state.timerDurationSeconds !== 'number') state.timerDurationSeconds = 15;
+
 // Serve React build in production
 const publicDir = path.join(__dirname, 'public');
 app.use(express.static(publicDir));
@@ -92,19 +96,19 @@ function validateTeamToken(teamId, deviceId, token) {
 }
 
 // ===============================
-// AUTO-TIMER PER TEAM (FIXED)
+// AUTO-TIMER PER TEAM (GM CONTROLLED + SERVER TICK)
 // ===============================
 const DEFAULT_ANSWER_SECONDS = 15;
 
-let activeTeamTimer = null;      // timeout handle (end of timer)
-let activeTeamInterval = null;   // interval handle (tick each second)
+let activeTeamTimeout = null;     // ends timer
+let activeTeamInterval = null;    // emits tick
 let activeTimedTeamId = null;
-let activeTimerEndsAtMs = null;  // Date.now() + seconds*1000
+let activeTimerEndsAtMs = null;
 
 function clearActiveTeamTimer() {
-  if (activeTeamTimer) clearTimeout(activeTeamTimer);
+  if (activeTeamTimeout) clearTimeout(activeTeamTimeout);
   if (activeTeamInterval) clearInterval(activeTeamInterval);
-  activeTeamTimer = null;
+  activeTeamTimeout = null;
   activeTeamInterval = null;
   activeTimedTeamId = null;
   activeTimerEndsAtMs = null;
@@ -112,6 +116,7 @@ function clearActiveTeamTimer() {
 
 function emitTimerStop() {
   io.emit('timer_stop');
+
   state.timerActive = false;
   state.timerSeconds = null;
   saveState(state);
@@ -120,8 +125,7 @@ function emitTimerStop() {
 
 function emitTimerStart(seconds) {
   io.emit('timer_start', { seconds });
-  // also emit an immediate tick so clients render instantly
-  io.emit('timer_tick', { secondsLeft: seconds });
+  io.emit('timer_tick', { secondsLeft: seconds }); // render immediately
 
   state.timerActive = true;
   state.timerSeconds = seconds;
@@ -129,10 +133,20 @@ function emitTimerStart(seconds) {
   io.emit('game_state', state);
 }
 
+function getConfiguredSeconds() {
+  const s = Number(state.timerDurationSeconds);
+  if (Number.isFinite(s) && s > 0) return s;
+  return DEFAULT_ANSWER_SECONDS;
+}
+
 function canRunAutoTimer() {
   if (!state.currentQuestion) return false;
   if (state.currentQuestion.isPracticalTask) return false;
   if (!state.buzzersActive) return false;
+
+  // GM switch:
+  if (!state.timerEnabled) return false;
+
   return true;
 }
 
@@ -151,35 +165,35 @@ function startTimerForCurrentFirstTeam() {
     return;
   }
 
-  // if already timing this same team, do nothing
-  if (activeTeamTimer && activeTimedTeamId === teamId) return;
+  // don't restart if already timing this same first team
+  if (activeTeamTimeout && activeTimedTeamId === teamId) return;
 
   clearActiveTeamTimer();
 
-  const seconds = DEFAULT_ANSWER_SECONDS;
+  const seconds = getConfiguredSeconds();
   activeTimedTeamId = teamId;
   activeTimerEndsAtMs = Date.now() + seconds * 1000;
 
   emitTimerStart(seconds);
 
-  // tick every second from server (clients don't run their own setInterval)
   activeTeamInterval = setInterval(() => {
     if (!activeTimerEndsAtMs) return;
+
     const msLeft = activeTimerEndsAtMs - Date.now();
     const secondsLeft = Math.max(0, Math.ceil(msLeft / 1000));
 
     io.emit('timer_tick', { secondsLeft });
 
-    // keep state loosely updated (optional)
+    // keep state updated (optional, but helps reconnect clients)
     state.timerActive = true;
     state.timerSeconds = secondsLeft;
     saveState(state);
     io.emit('game_state', state);
   }, 1000);
 
-  activeTeamTimer = setTimeout(() => {
+  activeTeamTimeout = setTimeout(() => {
     const timedTeamId = activeTimedTeamId;
-    clearActiveTeamTimer(); // stop interval + timeout
+    clearActiveTeamTimer();
     handleTimeout(timedTeamId);
   }, seconds * 1000);
 }
@@ -193,35 +207,15 @@ function handleTimeout(timedTeamId) {
     return;
   }
 
-  // if queue changed between start and timeout, just start timer for new first
+  // if first team changed, don't penalize the wrong one; just start for new first
   if (timedTeamId && currentFirst !== timedTeamId) {
     startTimerForCurrentFirstTeam();
-  }
-
-  const points = state.currentQuestion.points;
-
-  state.teams = subtractPoints(state.teams, currentFirst, points);
-  state.buzzerQueue = nextTeam(state.buzzerQueue);
-
-  saveState(state);
-
-  io.emit('answer_result', { correct: false, teamId: currentFirst, reason: 'timeout' });
-  io.emit('score_update', state.teams);
-  io.emit('buzzer_update', state.buzzerQueue);
-  io.emit('game_state', state);
-
-  // next team timer
-  startTimerForCurrentFirstTeam();
-}
-
-function onQueuePossiblyChanged() {
-  startTimerForCurrentFirstTeam();
     return;
   }
 
   const points = state.currentQuestion.points;
 
-  // timeout = wrong => subtract + next team
+  // timeout == wrong
   state.teams = subtractPoints(state.teams, currentFirst, points);
   state.buzzerQueue = nextTeam(state.buzzerQueue);
 
@@ -232,11 +226,10 @@ function onQueuePossiblyChanged() {
   io.emit('buzzer_update', state.buzzerQueue);
   io.emit('game_state', state);
 
-  // Now start timer for the next team (if any)
+  // continue with next team (if any)
   startTimerForCurrentFirstTeam();
 }
 
-// When something changes queue (wrong, next_team, timeout, etc.) call this
 function onQueuePossiblyChanged() {
   startTimerForCurrentFirstTeam();
 }
@@ -361,7 +354,7 @@ io.on('connection', (socket) => {
     const question = state.questions.find(q => q.id === questionId);
     if (!question || question.used) return;
 
-    // reset timer
+    // reset timer visuals (regardless of enabled/disabled)
     clearActiveTeamTimer();
     emitTimerStop();
 
@@ -491,9 +484,9 @@ io.on('connection', (socket) => {
       io.emit('buzzer_update', state.buzzerQueue);
       io.emit('game_state', state);
 
-      // start timer only after first buzz; if more teams buzz, timer MUST NOT stop
+      // start timer ONLY after first buzz AND only if GM enabled timer
       if (prevLength === 0) {
-        onQueuePossiblyChanged(); // starts timer for first
+        onQueuePossiblyChanged();
       }
     }
   });
@@ -545,7 +538,8 @@ io.on('connection', (socket) => {
       io.emit('buzzer_update', state.buzzerQueue);
       io.emit('game_state', state);
 
-      onQueuePossiblyChanged(); // restart for next
+      // if timer enabled, continue to next team automatically
+      onQueuePossiblyChanged();
     }
   });
 
@@ -557,9 +551,30 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
+  // GM enables auto-timer with custom seconds
+  socket.on('start_timer', ({ seconds }) => {
+    const s = Number(seconds);
+    if (!Number.isFinite(s) || s <= 0) return;
+
+    state.timerEnabled = true;
+    state.timerDurationSeconds = s;
+
+    saveState(state);
+    io.emit('game_state', state);
+
+    // if there is already a queue, start immediately for first team
+    onQueuePossiblyChanged();
+  });
+
+  // GM disables auto-timer completely
   socket.on('stop_timer', () => {
+    state.timerEnabled = false;
+    saveState(state);
+
     clearActiveTeamTimer();
     emitTimerStop();
+
+    io.emit('game_state', state);
   });
 
   socket.on('reveal_answer', () => {
@@ -582,6 +597,11 @@ io.on('connection', (socket) => {
 
   socket.on('reset_game', () => {
     state = resetState();
+
+    // keep timer defaults sane even after resetState()
+    state.timerEnabled = false;
+    state.timerDurationSeconds = 15;
+
     saveState(state);
 
     clearActiveTeamTimer();
