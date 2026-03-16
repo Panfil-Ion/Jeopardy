@@ -3,17 +3,22 @@ export default function QuestionModal({
   answerRevealed,
   isControl = false,
   onClose,
-  timerSeconds = null, // NEW
-  timerActive = false, // NEW
+  timerSeconds = null,
+  timerTotalSeconds = 15, // NEW
+  timerActive = false,
 }) {
   if (!question) return null;
 
   const showTimer = !question.isPracticalTask && timerSeconds !== null;
+  const total = Number(timerTotalSeconds) || 15;
+  const pct = showTimer ? Math.max(0, Math.min(100, (timerSeconds / total) * 100)) : 0;
+
+  const color = timerSeconds > Math.max(8, total * 0.55) ? '#4caf50' : timerSeconds > Math.max(4, total * 0.25) ? '#ff9800' : '#f44336';
 
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
-        {/* NEW: timer strip pinned to top edge of modal */}
+        {/* Timer strip pinned to top edge of modal */}
         {showTimer && (
           <div style={styles.timerStrip}>
             <div style={styles.timerText}>
@@ -23,14 +28,15 @@ export default function QuestionModal({
               <div
                 style={{
                   ...styles.timerBarFill,
-                  width: `${Math.max(0, Math.min(100, (timerSeconds / 15) * 100))}%`,
+                  width: `${pct}%`,
+                  background: color,
                 }}
               />
             </div>
           </div>
         )}
 
-        <div style={styles.header}>
+        <div style={{ ...styles.header, marginTop: showTimer ? '26px' : 0 }}>
           <span style={styles.category}>{question.category}</span>
           <span style={styles.points}>${question.points}</span>
           {question.isPracticalTask && <span style={styles.practicalBadge}>🔧 PRACTICAL TASK</span>}
@@ -68,7 +74,7 @@ const styles = {
   },
   modal: {
     position: 'relative',
-    background: '#060ce9',
+    background: '#060ce9', // keep the original blue window
     border: '4px solid #FFD700',
     borderRadius: '12px',
     padding: '40px',
@@ -79,13 +85,12 @@ const styles = {
     overflow: 'hidden',
   },
 
-  // NEW timer styles
   timerStrip: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    background: '#0d0d3a',
+    background: '#060ce9', // CHANGED: keep same blue background as the modal
     borderBottom: '2px solid #FFD700',
     padding: '10px 16px',
   },
@@ -99,15 +104,14 @@ const styles = {
   timerBarBg: {
     width: '100%',
     height: '12px',
-    background: '#1a1a4a',
+    background: 'rgba(0,0,0,0.25)', // subtle dark overlay so bar is visible on blue
     borderRadius: '8px',
     overflow: 'hidden',
   },
   timerBarFill: {
     height: '100%',
-    background: '#4caf50',
     borderRadius: '8px',
-    transition: 'width 1s linear',
+    transition: 'width 1s linear, background 0.3s',
   },
 
   header: {
@@ -117,7 +121,6 @@ const styles = {
     gap: '20px',
     marginBottom: '30px',
     flexWrap: 'wrap',
-    marginTop: '20px', // gives space under timer strip
   },
   category: {
     color: '#FFD700',
