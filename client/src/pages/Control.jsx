@@ -12,8 +12,7 @@ export default function Control() {
   const [adjustAmounts, setAdjustAmounts] = useState({});
 
   // NEW: practical task per-question pending teams (local UI state)
-  const [pendingPracticalTeamIds, setPendingPracticalTeamIds] = useState([]);
-  const [pendingQuestionId, setPendingQuestionId] = useState(null);
+
 
   // Always set up socket listeners (independent of auth state)
   useEffect(() => {
