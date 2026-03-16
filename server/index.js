@@ -6,7 +6,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 
-const { loadState, saveState, resetState } = require('./gameState');
+const { loadState, saveState, resetState, saveQuestionsToFile } = require('./gameState');
 const { addBuzz, resetQueue, nextTeam } = require('./buzzerManager');
 const { adjustScore, addPoints, subtractPoints } = require('./scoreManager');
 
@@ -177,9 +177,11 @@ app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res
   const { questions, pass } = req.body;
   if (pass !== ADMIN_PASSWORD) return res.status(403).json({ ok: false, error: 'Unauthorized' });
   if (!Array.isArray(questions)) return res.status(400).json({ ok: false });
+
   state.questions = questions;
-  saveQuestionsToFile(questions);
+  saveQuestionsToFile(questions); // persist for refresh + reset_game
   saveState(state);
+
   io.emit('game_state', state);
   res.json({ ok: true });
 });
@@ -187,7 +189,6 @@ app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res
 // ===============================
 // SPA FALLBACK
 // ===============================
-
 const spaIndexFile = path.join(publicDir, 'index.html');
 const spaIndexContent = fs.existsSync(spaIndexFile) ? fs.readFileSync(spaIndexFile, 'utf8') : null;
 
@@ -206,64 +207,100 @@ app.get('*', (req, res) => {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
+  // Send current state to newly connected client
   socket.emit('game_state', state);
 
   socket.on('request_state', () => {
     socket.emit('game_state', state);
   });
 
-  // inside io.on('connection', ...) replace/select_question handler with this guard:
-socket.on('select_question', ({ questionId }) => {
-  // NEW: do not allow selecting another question while one is open
-  if (state.currentQuestion) return;
+  // GM selects a question (LOCK: cannot select another while one is open)
+  socket.on('select_question', ({ questionId }) => {
+    if (state.currentQuestion) return;
 
-  const question = state.questions.find(q => q.id === questionId);
-  if (!question || question.used) return;
+    const question = state.questions.find(q => q.id === questionId);
+    if (!question || question.used) return;
 
-  state.currentQuestion = question;
-  state.answerRevealed = false;
+    state.currentQuestion = question;
+    state.answerRevealed = false;
 
-  if (question.isPracticalTask) {
-    state.buzzersActive = false;
-    state.buzzerQueue = [];
+    if (question.isPracticalTask) {
+      state.buzzersActive = false;
+      state.buzzerQueue = resetQueue();
 
-    // NEW: initialize practical pending teams (persisted)
-    state.practicalPendingTeamIds = (state.teams || []).map(t => t.id);
-  } else {
-    state.buzzersActive = true;
-    state.buzzerQueue = resetQueue();
-  }
+      // Persisted pending teams list (used by /control even after refresh)
+      state.practicalPendingTeamIds = (state.teams || []).map(t => t.id);
+    } else {
+      state.buzzersActive = true;
+      state.buzzerQueue = resetQueue();
+    }
 
-  state.timerActive = false;
-  saveState(state);
+    state.timerActive = false;
+    saveState(state);
 
-  io.emit('question_open', question);
+    io.emit('question_open', question);
 
-  if (!question.isPracticalTask) {
-    io.emit('buzzer_activated');
-    io.emit('buzzer_update', state.buzzerQueue);
-  }
-  io.emit('game_state', state);
-});
+    if (!question.isPracticalTask) {
+      io.emit('buzzer_activated');
+      io.emit('buzzer_update', state.buzzerQueue);
+    }
 
+    io.emit('game_state', state);
+  });
+
+  // Practical tasks: mark one team as processed (skip or correct)
+  socket.on('practical_mark_team_done', ({ teamId }) => {
+    if (!state.currentQuestion || !state.currentQuestion.isPracticalTask) return;
+
+    const pending = Array.isArray(state.practicalPendingTeamIds) ? state.practicalPendingTeamIds : [];
+    state.practicalPendingTeamIds = pending.filter(id => id !== teamId);
+
+    // if done with all teams, close question and mark used
+    if (state.practicalPendingTeamIds.length === 0) {
+      if (state.currentQuestion) {
+        state.questions = state.questions.map(q =>
+          q.id === state.currentQuestion.id ? { ...q, used: true } : q
+        );
+      }
+
+      state.currentQuestion = null;
+      state.answerRevealed = false;
+      state.buzzersActive = false;
+      state.buzzerQueue = resetQueue();
+      state.timerActive = false;
+
+      saveState(state);
+      io.emit('question_close');
+      io.emit('game_state', state);
+      return;
+    }
+
+    saveState(state);
+    io.emit('game_state', state);
+  });
+
+  // GM closes question without judging
   socket.on('close_question', () => {
     if (state.currentQuestion) {
       state.questions = state.questions.map(q =>
         q.id === state.currentQuestion.id ? { ...q, used: true } : q
       );
     }
+
     state.practicalPendingTeamIds = [];
     state.currentQuestion = null;
     state.answerRevealed = false;
     state.buzzersActive = false;
     state.buzzerQueue = resetQueue();
     state.timerActive = false;
+
     saveState(state);
 
     io.emit('question_close');
     io.emit('game_state', state);
   });
 
+  // GM activates buzzers
   socket.on('activate_buzzers', () => {
     state.buzzersActive = true;
     state.buzzerQueue = resetQueue();
@@ -274,6 +311,7 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
+  // GM resets buzzers
   socket.on('reset_buzzers', () => {
     state.buzzersActive = false;
     state.buzzerQueue = resetQueue();
@@ -284,7 +322,7 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
-  // TOKEN + OWNER protected buzz
+  // Team buzzes in (TOKEN + OWNER protected)
   socket.on('buzz', ({ teamId, deviceId, token, timestamp }) => {
     if (!state.buzzersActive) return;
 
@@ -306,6 +344,7 @@ socket.on('select_question', ({ questionId }) => {
     }
   });
 
+  // GM judges answer (normal questions)
   socket.on('judge_answer', ({ correct, teamId }) => {
     if (!state.currentQuestion) return;
 
@@ -317,13 +356,19 @@ socket.on('select_question', ({ questionId }) => {
       state.questions = state.questions.map(q =>
         q.id === state.currentQuestion.id ? { ...q, used: true } : q
       );
+
+      state.practicalPendingTeamIds = [];
       state.currentQuestion = null;
       state.buzzersActive = false;
       state.buzzerQueue = resetQueue();
       state.answerRevealed = false;
       state.timerActive = false;
     } else {
-      if (!isPractical) state.teams = subtractPoints(state.teams, teamId, points);
+      // For practical tasks, wrong answer does NOT deduct points
+      if (!isPractical) {
+        state.teams = subtractPoints(state.teams, teamId, points);
+      }
+      // Move to next team in queue
       state.buzzerQueue = nextTeam(state.buzzerQueue);
     }
 
@@ -334,9 +379,12 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('game_state', state);
 
-    if (correct) io.emit('question_close');
+    if (correct) {
+      io.emit('question_close');
+    }
   });
 
+  // GM adjusts score manually
   socket.on('adjust_score', ({ teamId, delta }) => {
     state.teams = adjustScore(state.teams, teamId, delta);
     saveState(state);
@@ -345,6 +393,7 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
+  // GM starts timer
   socket.on('start_timer', ({ seconds }) => {
     state.timerActive = true;
     state.timerSeconds = seconds || 15;
@@ -354,6 +403,7 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
+  // GM stops timer
   socket.on('stop_timer', () => {
     state.timerActive = false;
     saveState(state);
@@ -362,6 +412,7 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
+  // GM reveals answer
   socket.on('reveal_answer', () => {
     state.answerRevealed = true;
     saveState(state);
@@ -370,6 +421,7 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
+  // GM moves to next team
   socket.on('next_team', () => {
     state.buzzerQueue = nextTeam(state.buzzerQueue);
     saveState(state);
@@ -378,6 +430,7 @@ socket.on('select_question', ({ questionId }) => {
     io.emit('game_state', state);
   });
 
+  // GM resets the entire game
   socket.on('reset_game', () => {
     state = resetState();
     saveState(state);
