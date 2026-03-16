@@ -8,8 +8,8 @@ export default function Control() {
   const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [adjustAmounts, setAdjustAmounts] = useState({});
+  const [timerInput, setTimerInput] = useState(15);
 
-  // Always set up socket listeners (independent of auth state)
   useEffect(() => {
     function onGameState(state) {
       setGameState(state);
@@ -79,6 +79,7 @@ export default function Control() {
 
   const { currentQuestion, buzzersActive, buzzerQueue, teams, questions, answerRevealed } = gameState;
   const firstInQueue = buzzerQueue[0];
+  const practicalPending = Array.isArray(gameState.practicalPendingTeamIds) ? gameState.practicalPendingTeamIds : [];
 
   function handleSelectQuestion(questionId) {
     socket.emit('select_question', { questionId });
@@ -97,7 +98,11 @@ export default function Control() {
     return parseInt(adjustAmounts[teamId] || 100, 10) || 100;
   }
 
-  const practicalPending = Array.isArray(gameState.practicalPendingTeamIds) ? gameState.practicalPendingTeamIds : [];
+  function startTimer() {
+    const seconds = Number(timerInput);
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    socket.emit('start_timer', { seconds });
+  }
 
   return (
     <div style={styles.page}>
@@ -125,12 +130,7 @@ export default function Control() {
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>
                 {currentQuestion.isPracticalTask ? '🔧 PRACTICAL TASK' : '❓ Current Question'}
-                <span
-                  style={{
-                    ...styles.pointsBadge,
-                    background: currentQuestion.isPracticalTask ? '#b85c00' : '#060ce9',
-                  }}
-                >
+                <span style={{ ...styles.pointsBadge, background: currentQuestion.isPracticalTask ? '#b85c00' : '#060ce9' }}>
                   ${currentQuestion.points}
                 </span>
               </h2>
@@ -186,12 +186,6 @@ export default function Control() {
                           </button>
                         </div>
                       ))}
-
-                    {practicalPending.length === 0 && (
-                      <div style={{ color: '#aaa', fontSize: '13px' }}>
-                        Nicio echipă în așteptare (ar trebui să se închidă automat).
-                      </div>
-                    )}
                   </div>
                 </div>
               ) : firstInQueue ? (
@@ -213,10 +207,32 @@ export default function Control() {
                 <div style={{ color: '#aaa', marginBottom: '10px' }}>Nicio echipă nu a buzz-uit încă.</div>
               )}
 
-              {/* Timer controls */}
+              {/* Timer controls (manual seconds input) */}
               <div style={styles.controlRow}>
-                <button style={styles.btn} onClick={() => socket.emit('start_timer', { seconds: 15 })}>
-                  ▶️ Start Timer (15s)
+                <input
+                  type="number"
+                  min="1"
+                  value={timerInput}
+                  onChange={e => setTimerInput(e.target.value)}
+                  style={{
+                    width: '110px',
+                    padding: '8px',
+                    borderRadius: '6px',
+                    border: '1px solid #444',
+                    background: '#222',
+                    color: 'white',
+                    fontSize: '13px',
+                    textAlign: 'center',
+                    fontFamily: '"Arial Black", Arial, sans-serif',
+                  }}
+                />
+                <button
+                  style={{ ...styles.btn, background: '#1a3a7a' }}
+                  onClick={startTimer}
+                  disabled={currentQuestion.isPracticalTask}
+                  title={currentQuestion.isPracticalTask ? 'Timer disabled for practical tasks' : ''}
+                >
+                  ▶️ Start Timer
                 </button>
                 <button style={{ ...styles.btn, background: '#555' }} onClick={() => socket.emit('stop_timer')}>
                   ⏹ Stop Timer
@@ -294,16 +310,10 @@ export default function Control() {
                     onChange={e => setAdjustAmounts(prev => ({ ...prev, [team.id]: e.target.value }))}
                     style={styles.adjustInput}
                   />
-                  <button
-                    style={{ ...styles.smallBtn, background: '#1a5c1a' }}
-                    onClick={() => handleAdjustScore(team.id, getAdjustAmount(team.id))}
-                  >
+                  <button style={{ ...styles.smallBtn, background: '#1a5c1a' }} onClick={() => handleAdjustScore(team.id, getAdjustAmount(team.id))}>
                     +
                   </button>
-                  <button
-                    style={{ ...styles.smallBtn, background: '#7a1a1a' }}
-                    onClick={() => handleAdjustScore(team.id, -getAdjustAmount(team.id))}
-                  >
+                  <button style={{ ...styles.smallBtn, background: '#7a1a1a' }} onClick={() => handleAdjustScore(team.id, -getAdjustAmount(team.id))}>
                     −
                   </button>
                 </div>
