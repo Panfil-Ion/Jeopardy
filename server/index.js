@@ -196,7 +196,6 @@ function handleTimeout(timedTeamId) {
   // if queue changed between start and timeout, just start timer for new first
   if (timedTeamId && currentFirst !== timedTeamId) {
     startTimerForCurrentFirstTeam();
-    return;
   }
 
   const points = state.currentQuestion.points;
