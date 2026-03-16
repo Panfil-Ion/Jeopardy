@@ -96,14 +96,18 @@ function validateTeamToken(teamId, deviceId, token) {
 // ===============================
 const DEFAULT_ANSWER_SECONDS = 15;
 
-// we store explicit info about which team is currently timed
-let activeTeamTimer = null; // timeout handle
+let activeTeamTimer = null;      // timeout handle (end of timer)
+let activeTeamInterval = null;   // interval handle (tick each second)
 let activeTimedTeamId = null;
+let activeTimerEndsAtMs = null;  // Date.now() + seconds*1000
 
 function clearActiveTeamTimer() {
   if (activeTeamTimer) clearTimeout(activeTeamTimer);
+  if (activeTeamInterval) clearInterval(activeTeamInterval);
   activeTeamTimer = null;
+  activeTeamInterval = null;
   activeTimedTeamId = null;
+  activeTimerEndsAtMs = null;
 }
 
 function emitTimerStop() {
@@ -116,6 +120,9 @@ function emitTimerStop() {
 
 function emitTimerStart(seconds) {
   io.emit('timer_start', { seconds });
+  // also emit an immediate tick so clients render instantly
+  io.emit('timer_tick', { secondsLeft: seconds });
+
   state.timerActive = true;
   state.timerSeconds = seconds;
   saveState(state);
@@ -139,35 +146,46 @@ function startTimerForCurrentFirstTeam() {
 
   const teamId = getFirstTeamId();
   if (!teamId) {
-    // no one to time
     clearActiveTeamTimer();
     emitTimerStop();
     return;
   }
 
-  // IMPORTANT: do not restart timer if same team already being timed
+  // if already timing this same team, do nothing
   if (activeTeamTimer && activeTimedTeamId === teamId) return;
 
-  // restart for new first team
   clearActiveTeamTimer();
 
   const seconds = DEFAULT_ANSWER_SECONDS;
   activeTimedTeamId = teamId;
+  activeTimerEndsAtMs = Date.now() + seconds * 1000;
 
   emitTimerStart(seconds);
 
+  // tick every second from server (clients don't run their own setInterval)
+  activeTeamInterval = setInterval(() => {
+    if (!activeTimerEndsAtMs) return;
+    const msLeft = activeTimerEndsAtMs - Date.now();
+    const secondsLeft = Math.max(0, Math.ceil(msLeft / 1000));
+
+    io.emit('timer_tick', { secondsLeft });
+
+    // keep state loosely updated (optional)
+    state.timerActive = true;
+    state.timerSeconds = secondsLeft;
+    saveState(state);
+    io.emit('game_state', state);
+  }, 1000);
+
   activeTeamTimer = setTimeout(() => {
-    activeTeamTimer = null;
     const timedTeamId = activeTimedTeamId;
-    activeTimedTeamId = null;
+    clearActiveTeamTimer(); // stop interval + timeout
     handleTimeout(timedTeamId);
   }, seconds * 1000);
 }
 
 function handleTimeout(timedTeamId) {
-  // timeout should only apply if still same question open and team is still first
   if (!canRunAutoTimer()) return;
-  if (!state.currentQuestion) return;
 
   const currentFirst = getFirstTeamId();
   if (!currentFirst) {
@@ -175,9 +193,30 @@ function handleTimeout(timedTeamId) {
     return;
   }
 
-  // if queue moved meanwhile and timed team isn't first anymore, just start timer for new first
+  // if queue changed between start and timeout, just start timer for new first
   if (timedTeamId && currentFirst !== timedTeamId) {
     startTimerForCurrentFirstTeam();
+    return;
+  }
+
+  const points = state.currentQuestion.points;
+
+  state.teams = subtractPoints(state.teams, currentFirst, points);
+  state.buzzerQueue = nextTeam(state.buzzerQueue);
+
+  saveState(state);
+
+  io.emit('answer_result', { correct: false, teamId: currentFirst, reason: 'timeout' });
+  io.emit('score_update', state.teams);
+  io.emit('buzzer_update', state.buzzerQueue);
+  io.emit('game_state', state);
+
+  // next team timer
+  startTimerForCurrentFirstTeam();
+}
+
+function onQueuePossiblyChanged() {
+  startTimerForCurrentFirstTeam();
     return;
   }
 
