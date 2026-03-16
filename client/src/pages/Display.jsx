@@ -18,17 +18,14 @@ export default function Display() {
   const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [flashOverlay, setFlashOverlay] = useState(null); // 'correct' | 'wrong' | null
+  const [flashOverlay, setFlashOverlay] = useState(null);
 
-  // Timer state displayed inside QuestionModal header
+  // TIMER: now purely server-driven (no local setInterval)
   const [timerSeconds, setTimerSeconds] = useState(null);
   const [timerActive, setTimerActive] = useState(false);
   const [timerTotalSeconds, setTimerTotalSeconds] = useState(15);
-  const timerIntervalRef = useRef(null);
 
-  // FIX: useRef for queue length so we DON'T trigger effect re-run
   const prevQueueLengthRef = useRef(0);
-
   const audios = useRef({});
 
   function unlockAudio() {
@@ -36,7 +33,6 @@ export default function Display() {
     audios.current.correct = createAudio('/sounds/correct.mp3');
     audios.current.wrong = createAudio('/sounds/wrong.mp3');
 
-    // Play a silent buffer to unlock
     Object.values(audios.current).forEach(a => {
       a.volume = 0.01;
       a.play().catch(() => {});
@@ -57,50 +53,19 @@ export default function Display() {
     audio.play().catch(() => {});
   }
 
-  function stopLocalTimer() {
-    clearInterval(timerIntervalRef.current);
-    timerIntervalRef.current = null;
-
-    setTimerActive(false);
-    setTimerSeconds(null);
-  }
-
-  function startLocalTimer(totalSeconds) {
-    const s = Number(totalSeconds) || 15;
-
-    clearInterval(timerIntervalRef.current);
-    timerIntervalRef.current = null;
-
-    setTimerTotalSeconds(s);
-    setTimerSeconds(s);
-    setTimerActive(true);
-
-    timerIntervalRef.current = setInterval(() => {
-      setTimerSeconds(prev => {
-        if (prev === null) return prev;
-        // keep showing even at 0 (server controls stop/start)
-        return Math.max(0, prev - 1);
-      });
-    }, 1000);
-  }
-
   useEffect(() => {
     function onGameState(state) {
       setGameState(state);
     }
 
     function onBuzzerUpdate(queue) {
-      // play buzzer sound only if queue length increased
       const prevLen = prevQueueLengthRef.current;
       if (audioUnlocked && queue.length > prevLen) {
         playSound('buzzer');
       }
       prevQueueLengthRef.current = queue.length;
 
-      setGameState(prev => {
-        if (!prev) return prev;
-        return { ...prev, buzzerQueue: queue };
-      });
+      setGameState(prev => (prev ? { ...prev, buzzerQueue: queue } : prev));
     }
 
     function onScoreUpdate(teams) {
@@ -109,20 +74,19 @@ export default function Display() {
 
     function onQuestionOpen(question) {
       setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
-
-      // question open => hide timer until server emits timer_start
-      stopLocalTimer();
+      // Hide timer until server starts it
+      setTimerActive(false);
+      setTimerSeconds(null);
     }
 
     function onQuestionClose() {
       setGameState(prev => (prev ? { ...prev, currentQuestion: null, answerRevealed: false } : prev));
-      stopLocalTimer();
+      setTimerActive(false);
+      setTimerSeconds(null);
     }
 
     function onAnswerResult({ correct }) {
-      if (audioUnlocked) {
-        playSound(correct ? 'correct' : 'wrong');
-      }
+      if (audioUnlocked) playSound(correct ? 'correct' : 'wrong');
       if (correct) {
         confetti({ particleCount: 200, spread: 120, origin: { y: 0.6 }, zIndex: 2000 });
         setFlashOverlay('correct');
@@ -144,12 +108,22 @@ export default function Display() {
       setGameState(prev => (prev ? { ...prev, buzzersActive: false } : prev));
     }
 
+    // SERVER-DRIVEN TIMER EVENTS
     function onTimerStart({ seconds }) {
-      startLocalTimer(seconds || 15);
+      const s = Number(seconds) || 15;
+      setTimerTotalSeconds(s);
+      setTimerSeconds(s);
+      setTimerActive(true);
+    }
+
+    function onTimerTick({ secondsLeft }) {
+      setTimerSeconds(Number.isFinite(secondsLeft) ? secondsLeft : 0);
+      setTimerActive(true);
     }
 
     function onTimerStop() {
-      stopLocalTimer();
+      setTimerActive(false);
+      setTimerSeconds(null);
     }
 
     socket.on('game_state', onGameState);
@@ -161,7 +135,9 @@ export default function Display() {
     socket.on('answer_revealed', onAnswerRevealed);
     socket.on('buzzer_activated', onBuzzerActivated);
     socket.on('buzzer_deactivated', onBuzzerDeactivated);
+
     socket.on('timer_start', onTimerStart);
+    socket.on('timer_tick', onTimerTick);
     socket.on('timer_stop', onTimerStop);
 
     socket.emit('request_state');
@@ -176,13 +152,12 @@ export default function Display() {
       socket.off('answer_revealed', onAnswerRevealed);
       socket.off('buzzer_activated', onBuzzerActivated);
       socket.off('buzzer_deactivated', onBuzzerDeactivated);
-      socket.off('timer_start', onTimerStart);
-      socket.off('timer_stop', onTimerStop);
 
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
+      socket.off('timer_start', onTimerStart);
+      socket.off('timer_tick', onTimerTick);
+      socket.off('timer_stop', onTimerStop);
     };
-  }, [audioUnlocked]); // FIX: removed prevQueueLength dependency
+  }, [audioUnlocked]);
 
   if (!authorized) {
     return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
