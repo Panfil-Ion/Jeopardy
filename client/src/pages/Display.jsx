@@ -20,7 +20,7 @@ export default function Display() {
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [flashOverlay, setFlashOverlay] = useState(null);
 
-  // TIMER: now purely server-driven (no local setInterval)
+  // TIMER: server-driven
   const [timerSeconds, setTimerSeconds] = useState(null);
   const [timerActive, setTimerActive] = useState(false);
   const [timerTotalSeconds, setTimerTotalSeconds] = useState(15);
@@ -74,7 +74,6 @@ export default function Display() {
 
     function onQuestionOpen(question) {
       setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
-      // Hide timer until server starts it
       setTimerActive(false);
       setTimerSeconds(null);
     }
@@ -108,7 +107,6 @@ export default function Display() {
       setGameState(prev => (prev ? { ...prev, buzzersActive: false } : prev));
     }
 
-    // SERVER-DRIVEN TIMER EVENTS
     function onTimerStart({ seconds }) {
       const s = Number(seconds) || 15;
       setTimerTotalSeconds(s);
