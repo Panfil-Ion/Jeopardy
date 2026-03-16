@@ -4,7 +4,7 @@ export default function QuestionModal({
   isControl = false,
   onClose,
   timerSeconds = null,
-  timerTotalSeconds = 15, // NEW
+  timerTotalSeconds = 15,
   timerActive = false,
 }) {
   if (!question) return null;
@@ -13,12 +13,16 @@ export default function QuestionModal({
   const total = Number(timerTotalSeconds) || 15;
   const pct = showTimer ? Math.max(0, Math.min(100, (timerSeconds / total) * 100)) : 0;
 
-  const color = timerSeconds > Math.max(8, total * 0.55) ? '#4caf50' : timerSeconds > Math.max(4, total * 0.25) ? '#ff9800' : '#f44336';
+  const color =
+    timerSeconds > Math.max(8, total * 0.55)
+      ? '#4caf50'
+      : timerSeconds > Math.max(4, total * 0.25)
+        ? '#ff9800'
+        : '#f44336';
 
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
-        {/* Timer strip pinned to top edge of modal */}
         {showTimer && (
           <div style={styles.timerStrip}>
             <div style={styles.timerText}>
@@ -74,7 +78,7 @@ const styles = {
   },
   modal: {
     position: 'relative',
-    background: '#060ce9', // keep the original blue window
+    background: '#060ce9',
     border: '4px solid #FFD700',
     borderRadius: '12px',
     padding: '40px',
@@ -84,13 +88,12 @@ const styles = {
     fontFamily: '"Arial Black", Arial, sans-serif',
     overflow: 'hidden',
   },
-
   timerStrip: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    background: '#060ce9', // CHANGED: keep same blue background as the modal
+    background: '#060ce9',
     borderBottom: '2px solid #FFD700',
     padding: '10px 16px',
   },
@@ -104,7 +107,7 @@ const styles = {
   timerBarBg: {
     width: '100%',
     height: '12px',
-    background: 'rgba(0,0,0,0.25)', // subtle dark overlay so bar is visible on blue
+    background: 'rgba(0,0,0,0.25)',
     borderRadius: '8px',
     overflow: 'hidden',
   },
@@ -113,7 +116,6 @@ const styles = {
     borderRadius: '8px',
     transition: 'width 1s linear, background 0.3s',
   },
-
   header: {
     display: 'flex',
     justifyContent: 'center',
