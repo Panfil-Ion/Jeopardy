@@ -167,12 +167,12 @@ export default function Control() {
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>📋 Question Board</h2>
             <Board
-              questions={questions}
-              onSelectQuestion={handleSelectQuestion}
-              isControl={true}
-              isDisplay={false}
-              hidesPractice={false}
-            />
+  questions={questions}
+  onSelectQuestion={currentQuestion ? null : handleSelectQuestion}
+  isControl={true}
+  isDisplay={false}
+  hidesPractice={false}
+/>
           </div>
         </div>
 
