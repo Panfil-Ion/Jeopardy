@@ -7,6 +7,7 @@ import BuzzerQueue from '../components/BuzzerQueue.jsx';
 import QuestionModal from '../components/QuestionModal.jsx';
 import AdminPasswordGate from '../components/AdminPasswordGate.jsx';
 
+// Audio setup
 function createAudio(src) {
   const audio = new Audio(src);
   audio.preload = 'auto';
@@ -17,14 +18,16 @@ export default function Display() {
   const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [flashOverlay, setFlashOverlay] = useState(null);
-  const [prevQueueLength, setPrevQueueLength] = useState(0);
+  const [flashOverlay, setFlashOverlay] = useState(null); // 'correct' | 'wrong' | null
 
-  // Timer state - IMPORTANT: do not auto-stop at 0 in client
+  // Timer state displayed inside QuestionModal header
   const [timerSeconds, setTimerSeconds] = useState(null);
   const [timerActive, setTimerActive] = useState(false);
   const [timerTotalSeconds, setTimerTotalSeconds] = useState(15);
   const timerIntervalRef = useRef(null);
+
+  // FIX: useRef for queue length so we DON'T trigger effect re-run
+  const prevQueueLengthRef = useRef(0);
 
   const audios = useRef({});
 
@@ -33,6 +36,7 @@ export default function Display() {
     audios.current.correct = createAudio('/sounds/correct.mp3');
     audios.current.wrong = createAudio('/sounds/wrong.mp3');
 
+    // Play a silent buffer to unlock
     Object.values(audios.current).forEach(a => {
       a.volume = 0.01;
       a.play().catch(() => {});
@@ -74,7 +78,7 @@ export default function Display() {
     timerIntervalRef.current = setInterval(() => {
       setTimerSeconds(prev => {
         if (prev === null) return prev;
-        // IMPORTANT FIX: never "stop" locally; just clamp to 0 and keep showing
+        // keep showing even at 0 (server controls stop/start)
         return Math.max(0, prev - 1);
       });
     }, 1000);
@@ -86,12 +90,15 @@ export default function Display() {
     }
 
     function onBuzzerUpdate(queue) {
+      // play buzzer sound only if queue length increased
+      const prevLen = prevQueueLengthRef.current;
+      if (audioUnlocked && queue.length > prevLen) {
+        playSound('buzzer');
+      }
+      prevQueueLengthRef.current = queue.length;
+
       setGameState(prev => {
         if (!prev) return prev;
-        if (audioUnlocked && queue.length > prevQueueLength) {
-          playSound('buzzer');
-        }
-        setPrevQueueLength(queue.length);
         return { ...prev, buzzerQueue: queue };
       });
     }
@@ -102,7 +109,8 @@ export default function Display() {
 
     function onQuestionOpen(question) {
       setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
-      // question open => timer hidden until server emits timer_start
+
+      // question open => hide timer until server emits timer_start
       stopLocalTimer();
     }
 
@@ -112,8 +120,9 @@ export default function Display() {
     }
 
     function onAnswerResult({ correct }) {
-      if (audioUnlocked) playSound(correct ? 'correct' : 'wrong');
-
+      if (audioUnlocked) {
+        playSound(correct ? 'correct' : 'wrong');
+      }
       if (correct) {
         confetti({ particleCount: 200, spread: 120, origin: { y: 0.6 }, zIndex: 2000 });
         setFlashOverlay('correct');
@@ -173,7 +182,7 @@ export default function Display() {
       clearInterval(timerIntervalRef.current);
       timerIntervalRef.current = null;
     };
-  }, [audioUnlocked, prevQueueLength]);
+  }, [audioUnlocked]); // FIX: removed prevQueueLength dependency
 
   if (!authorized) {
     return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
@@ -273,6 +282,7 @@ const styles = {
     cursor: 'pointer',
     fontWeight: 'bold',
     boxShadow: '0 6px 24px rgba(0,0,0,0.4)',
+    transition: 'transform 0.1s',
   },
   loading: {
     minHeight: '100vh',
@@ -334,5 +344,6 @@ const styles = {
     fontSize: '20px',
     fontWeight: 'bold',
     fontFamily: '"Arial Black", Arial, sans-serif',
+    animation: 'pulse 1s infinite',
   },
 };
