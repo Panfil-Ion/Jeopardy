@@ -2,8 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const STATE_FILE = path.join(__dirname, '..', 'game_state.json');
-
-
+const QUESTIONS_FILE = path.join(__dirname, '..', 'questions.json');
 
 const DEFAULT_QUESTIONS = [
   // JavaScript
@@ -42,17 +41,39 @@ const DEFAULT_QUESTIONS = [
   { id: 'devops_5', category: 'DevOps', points: 500, question: 'Explain the difference between horizontal and vertical scaling', answer: 'Vertical scaling = adding more resources (CPU/RAM) to one machine. Horizontal scaling = adding more machines/instances. Horizontal is preferred for high availability', isPracticalTask: false, used: false },
 ];
 
+function loadQuestionsFromFile() {
+  try {
+    if (fs.existsSync(QUESTIONS_FILE)) {
+      const raw = fs.readFileSync(QUESTIONS_FILE, 'utf8');
+      const saved = JSON.parse(raw);
+      if (Array.isArray(saved)) return saved;
+    }
+  } catch (err) {
+    console.warn('Failed to load questions.json, using DEFAULT_QUESTIONS:', err.message);
+  }
+  return DEFAULT_QUESTIONS.map(q => ({ ...q }));
+}
+
+function saveQuestionsToFile(questions) {
+  try {
+    fs.writeFileSync(QUESTIONS_FILE, JSON.stringify(questions, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save questions.json:', err.message);
+  }
+}
+
 function createDefaultState() {
   return {
     round: 1,
     teams: [],
-    questions: DEFAULT_QUESTIONS.map(q => ({ ...q })),
+    questions: loadQuestionsFromFile().map(q => ({ ...q, used: false })), // reset used on new game
     currentQuestion: null,
     buzzersActive: false,
     buzzerQueue: [],
     answerRevealed: false,
     timerActive: false,
     timerSeconds: 15,
+    practicalPendingTeamIds: [],
   };
 }
 
@@ -61,6 +82,13 @@ function loadState() {
     if (fs.existsSync(STATE_FILE)) {
       const raw = fs.readFileSync(STATE_FILE, 'utf8');
       const saved = JSON.parse(raw);
+
+      // backwards-compatible defaults:
+      if (!Array.isArray(saved.questions)) saved.questions = loadQuestionsFromFile().map(q => ({ ...q, used: false }));
+      if (!Array.isArray(saved.teams)) saved.teams = [];
+      if (!Array.isArray(saved.buzzerQueue)) saved.buzzerQueue = [];
+      if (!saved.practicalPendingTeamIds) saved.practicalPendingTeamIds = [];
+
       console.log('Game state loaded from file.');
       return saved;
     }
@@ -79,7 +107,8 @@ function saveState(state) {
 }
 
 function resetState() {
+  // IMPORTANT: reset using persisted questions.json (latest saved in editor)
   return createDefaultState();
 }
 
-module.exports = { loadState, saveState, resetState };
+module.exports = { loadState, saveState, resetState, saveQuestionsToFile };
