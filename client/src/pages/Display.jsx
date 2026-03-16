@@ -7,7 +7,6 @@ import BuzzerQueue from '../components/BuzzerQueue.jsx';
 import QuestionModal from '../components/QuestionModal.jsx';
 import AdminPasswordGate from '../components/AdminPasswordGate.jsx';
 
-// Audio setup
 function createAudio(src) {
   const audio = new Audio(src);
   audio.preload = 'auto';
@@ -18,10 +17,10 @@ export default function Display() {
   const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [flashOverlay, setFlashOverlay] = useState(null); // 'correct' | 'wrong' | null
+  const [flashOverlay, setFlashOverlay] = useState(null);
   const [prevQueueLength, setPrevQueueLength] = useState(0);
 
-  // IMPORTANT: timer is shown only if we received timer_start (seconds != null)
+  // Timer state - IMPORTANT: do not auto-stop at 0 in client
   const [timerSeconds, setTimerSeconds] = useState(null);
   const [timerActive, setTimerActive] = useState(false);
   const [timerTotalSeconds, setTimerTotalSeconds] = useState(15);
@@ -75,13 +74,8 @@ export default function Display() {
     timerIntervalRef.current = setInterval(() => {
       setTimerSeconds(prev => {
         if (prev === null) return prev;
-        if (prev <= 1) {
-          clearInterval(timerIntervalRef.current);
-          timerIntervalRef.current = null;
-          setTimerActive(false);
-          return 0;
-        }
-        return prev - 1;
+        // IMPORTANT FIX: never "stop" locally; just clamp to 0 and keep showing
+        return Math.max(0, prev - 1);
       });
     }, 1000);
   }
@@ -108,8 +102,7 @@ export default function Display() {
 
     function onQuestionOpen(question) {
       setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
-
-      // Question opened => timer must be hidden until first buzz triggers timer_start from server
+      // question open => timer hidden until server emits timer_start
       stopLocalTimer();
     }
 
@@ -119,9 +112,8 @@ export default function Display() {
     }
 
     function onAnswerResult({ correct }) {
-      if (audioUnlocked) {
-        playSound(correct ? 'correct' : 'wrong');
-      }
+      if (audioUnlocked) playSound(correct ? 'correct' : 'wrong');
+
       if (correct) {
         confetti({ particleCount: 200, spread: 120, origin: { y: 0.6 }, zIndex: 2000 });
         setFlashOverlay('correct');
@@ -281,7 +273,6 @@ const styles = {
     cursor: 'pointer',
     fontWeight: 'bold',
     boxShadow: '0 6px 24px rgba(0,0,0,0.4)',
-    transition: 'transform 0.1s',
   },
   loading: {
     minHeight: '100vh',
@@ -343,6 +334,5 @@ const styles = {
     fontSize: '20px',
     fontWeight: 'bold',
     fontFamily: '"Arial Black", Arial, sans-serif',
-    animation: 'pulse 1s infinite',
   },
 };
