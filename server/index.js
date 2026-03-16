@@ -252,6 +252,7 @@ socket.on('select_question', ({ questionId }) => {
         q.id === state.currentQuestion.id ? { ...q, used: true } : q
       );
     }
+    state.practicalPendingTeamIds = [];
     state.currentQuestion = null;
     state.answerRevealed = false;
     state.buzzersActive = false;
