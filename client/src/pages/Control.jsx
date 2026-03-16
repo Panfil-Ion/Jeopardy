@@ -11,7 +11,9 @@ export default function Control() {
   const [gameState, setGameState] = useState(null);
   const [adjustAmounts, setAdjustAmounts] = useState({});
 
-  // Password check replaced by AdminPasswordGate component
+  // NEW: practical task per-question pending teams (local UI state)
+  const [pendingPracticalTeamIds, setPendingPracticalTeamIds] = useState([]);
+  const [pendingQuestionId, setPendingQuestionId] = useState(null);
 
   // Always set up socket listeners (independent of auth state)
   useEffect(() => {
@@ -19,31 +21,35 @@ export default function Control() {
       setGameState(state);
     }
     function onBuzzerUpdate(queue) {
-      setGameState(prev => prev ? { ...prev, buzzerQueue: queue } : prev);
+      setGameState(prev => (prev ? { ...prev, buzzerQueue: queue } : prev));
     }
     function onScoreUpdate(teams) {
-      setGameState(prev => prev ? { ...prev, teams } : prev);
+      setGameState(prev => (prev ? { ...prev, teams } : prev));
     }
     function onQuestionOpen(question) {
-      setGameState(prev => prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev);
+      setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
     }
     function onQuestionClose() {
-      setGameState(prev => prev ? { ...prev, currentQuestion: null, answerRevealed: false, timerActive: false } : prev);
+      setGameState(prev => (prev ? { ...prev, currentQuestion: null, answerRevealed: false, timerActive: false } : prev));
+
+      // reset local practical UI state
+      setPendingPracticalTeamIds([]);
+      setPendingQuestionId(null);
     }
     function onAnswerRevealed() {
-      setGameState(prev => prev ? { ...prev, answerRevealed: true } : prev);
+      setGameState(prev => (prev ? { ...prev, answerRevealed: true } : prev));
     }
     function onBuzzerActivated() {
-      setGameState(prev => prev ? { ...prev, buzzersActive: true } : prev);
+      setGameState(prev => (prev ? { ...prev, buzzersActive: true } : prev));
     }
     function onBuzzerDeactivated() {
-      setGameState(prev => prev ? { ...prev, buzzersActive: false } : prev);
+      setGameState(prev => (prev ? { ...prev, buzzersActive: false } : prev));
     }
     function onTimerStart({ seconds }) {
-      setGameState(prev => prev ? { ...prev, timerActive: true, timerSeconds: seconds } : prev);
+      setGameState(prev => (prev ? { ...prev, timerActive: true, timerSeconds: seconds } : prev));
     }
     function onTimerStop() {
-      setGameState(prev => prev ? { ...prev, timerActive: false } : prev);
+      setGameState(prev => (prev ? { ...prev, timerActive: false } : prev));
     }
 
     socket.on('game_state', onGameState);
@@ -57,7 +63,6 @@ export default function Control() {
     socket.on('timer_start', onTimerStart);
     socket.on('timer_stop', onTimerStop);
 
-    // Request current state in case we missed the initial event
     socket.emit('request_state');
 
     return () => {
@@ -74,6 +79,21 @@ export default function Control() {
     };
   }, []);
 
+  // NEW: when a practical question opens, initialize pending teams ONCE for that question
+  useEffect(() => {
+    if (!gameState?.currentQuestion) return;
+    if (!gameState.currentQuestion.isPracticalTask) return;
+
+    const qid = gameState.currentQuestion.id;
+
+    // if we already initialized for this question, do nothing
+    if (pendingQuestionId === qid && pendingPracticalTeamIds.length > 0) return;
+
+    // initialize pending list with all current teams
+    setPendingQuestionId(qid);
+    setPendingPracticalTeamIds(gameState.teams.map(t => t.id));
+  }, [gameState?.currentQuestion?.id, gameState?.currentQuestion?.isPracticalTask, gameState?.teams, pendingQuestionId, pendingPracticalTeamIds.length]);
+
   if (!authorized) {
     return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
   }
@@ -82,7 +102,7 @@ export default function Control() {
     return <div style={styles.loading}>Connecting to server...</div>;
   }
 
-  const { currentQuestion, buzzersActive, buzzerQueue, teams, questions, answerRevealed, timerActive } = gameState;
+  const { currentQuestion, buzzersActive, buzzerQueue, teams, questions, answerRevealed } = gameState;
   const firstInQueue = buzzerQueue[0];
 
   function handleSelectQuestion(questionId) {
@@ -102,6 +122,41 @@ export default function Control() {
     return parseInt(adjustAmounts[teamId] || 100, 10) || 100;
   }
 
+  // NEW: practical judge helpers
+  function practicalMarkTeamDone(teamId) {
+    setPendingPracticalTeamIds(prev => prev.filter(id => id !== teamId));
+  }
+
+  function practicalFinalizeIfDone(nextPendingIds) {
+    if (nextPendingIds.length === 0) {
+      socket.emit('close_question');
+    }
+  }
+
+  function practicalGivePoints(teamId, points) {
+    socket.emit('adjust_score', { teamId, delta: points });
+
+    setPendingPracticalTeamIds(prev => {
+      const next = prev.filter(id => id !== teamId);
+      practicalFinalizeIfDone(next);
+      return next;
+    });
+  }
+
+  function practicalSkip(teamId) {
+    // no score change
+    setPendingPracticalTeamIds(prev => {
+      const next = prev.filter(id => id !== teamId);
+      practicalFinalizeIfDone(next);
+      return next;
+    });
+  }
+
+  const practicalTeamsToShow =
+    currentQuestion?.isPracticalTask
+      ? teams.filter(t => pendingPracticalTeamIds.includes(t.id))
+      : [];
+
   return (
     <div style={styles.page}>
       <h1 style={styles.title}>🎮 GAME MASTER CONTROL</h1>
@@ -111,24 +166,28 @@ export default function Control() {
         <div style={styles.leftCol}>
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>📋 Question Board</h2>
-            <Board questions={questions} onSelectQuestion={handleSelectQuestion} isControl={true} isDisplay={false} hidesPractice={false} />
+            <Board
+              questions={questions}
+              onSelectQuestion={handleSelectQuestion}
+              isControl={true}
+              isDisplay={false}
+              hidesPractice={false}
+            />
           </div>
         </div>
 
         {/* Right: Controls */}
         <div style={styles.rightCol}>
-
           {/* Current Question Panel */}
           {currentQuestion ? (
             <div style={styles.section}>
               <h2 style={styles.sectionTitle}>
-                {currentQuestion.isPracticalTask
-                  ? '🔧 PRACTICAL TASK'
-                  : '❓ Current Question'}
+                {currentQuestion.isPracticalTask ? '🔧 PRACTICAL TASK' : '❓ Current Question'}
                 <span style={{ ...styles.pointsBadge, background: currentQuestion.isPracticalTask ? '#b85c00' : '#060ce9' }}>
                   ${currentQuestion.points}
                 </span>
               </h2>
+
               <div style={styles.questionBox}>
                 <div style={styles.questionCat}>{currentQuestion.category}</div>
                 <div style={styles.questionText}>{currentQuestion.question}</div>
@@ -142,34 +201,52 @@ export default function Control() {
               {currentQuestion.isPracticalTask ? (
                 <div style={styles.judgeSection}>
                   <div style={{ color: '#FFA500', fontSize: '14px', marginBottom: '8px', fontWeight: 'bold' }}>
-                    🔧 Judecată Practică — judecă fiecare echipă individual
+                    🔧 Judecată Practică — fiecare echipă trebuie evaluată. Întrebarea se închide doar după ce ai terminat toate echipele.
                   </div>
+
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {teams.map(team => (
-                      <div key={team.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px', background: '#0d0d3a', borderRadius: '4px' }}>
+                    {practicalTeamsToShow.map(team => (
+                      <div
+                        key={team.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '6px',
+                          background: '#0d0d3a',
+                          borderRadius: '4px',
+                        }}
+                      >
                         <span style={{ flex: 1, color: 'white', fontSize: '13px' }}>{team.name}</span>
+
                         <button
                           style={{ ...styles.correctBtn, flex: 'none', padding: '6px 12px', fontSize: '12px' }}
-                          onClick={() => socket.emit('adjust_score', { teamId: team.id, delta: currentQuestion.points })}
+                          onClick={() => practicalGivePoints(team.id, currentQuestion.points)}
                         >
                           ✅ +${currentQuestion.points}
                         </button>
+
                         <button
                           style={{ ...styles.wrongBtn, flex: 'none', padding: '6px 12px', fontSize: '12px', background: '#555' }}
-                          onClick={() => socket.emit('close_question')}
+                          onClick={() => practicalSkip(team.id)}
                         >
                           ⏭ Skip (0 pts)
                         </button>
                       </div>
                     ))}
+
+                    {practicalTeamsToShow.length === 0 && (
+                      <div style={{ color: '#aaa', fontSize: '13px', padding: '6px' }}>
+                        ✅ Toate echipele au fost procesate. (Se închide întrebarea…)
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : firstInQueue ? (
                 <div style={styles.judgeSection}>
                   <div style={styles.activeTeam}>
-                    Answering: <strong style={{ color: '#FFD700' }}>
-                      {teams.find(t => t.id === firstInQueue.teamId)?.name}
-                    </strong>
+                    Answering:{' '}
+                    <strong style={{ color: '#FFD700' }}>{teams.find(t => t.id === firstInQueue.teamId)?.name}</strong>
                   </div>
                   <div style={styles.judgeRow}>
                     <button style={styles.correctBtn} onClick={() => handleJudge(true)}>
@@ -234,12 +311,13 @@ export default function Control() {
           <div style={styles.section}>
             <BuzzerQueue queue={buzzerQueue} teams={teams} />
             <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-              <button style={{ ...styles.btn, flex: 1, background: buzzersActive ? '#555' : '#1a5c1a' }}
-                onClick={() => socket.emit('activate_buzzers')}>
+              <button
+                style={{ ...styles.btn, flex: 1, background: buzzersActive ? '#555' : '#1a5c1a' }}
+                onClick={() => socket.emit('activate_buzzers')}
+              >
                 🔔 Activate Buzzers
               </button>
-              <button style={{ ...styles.btn, flex: 1, background: '#7a1a1a' }}
-                onClick={() => socket.emit('reset_buzzers')}>
+              <button style={{ ...styles.btn, flex: 1, background: '#7a1a1a' }} onClick={() => socket.emit('reset_buzzers')}>
                 🔇 Reset Buzzers
               </button>
             </div>
@@ -262,12 +340,10 @@ export default function Control() {
                     onChange={e => setAdjustAmounts(prev => ({ ...prev, [team.id]: e.target.value }))}
                     style={styles.adjustInput}
                   />
-                  <button style={{ ...styles.smallBtn, background: '#1a5c1a' }}
-                    onClick={() => handleAdjustScore(team.id, getAdjustAmount(team.id))}>
+                  <button style={{ ...styles.smallBtn, background: '#1a5c1a' }} onClick={() => handleAdjustScore(team.id, getAdjustAmount(team.id))}>
                     +
                   </button>
-                  <button style={{ ...styles.smallBtn, background: '#7a1a1a' }}
-                    onClick={() => handleAdjustScore(team.id, -getAdjustAmount(team.id))}>
+                  <button style={{ ...styles.smallBtn, background: '#7a1a1a' }} onClick={() => handleAdjustScore(team.id, -getAdjustAmount(team.id))}>
                     −
                   </button>
                 </div>
