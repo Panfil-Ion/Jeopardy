@@ -21,9 +21,10 @@ export default function Display() {
   const [flashOverlay, setFlashOverlay] = useState(null); // 'correct' | 'wrong' | null
   const [prevQueueLength, setPrevQueueLength] = useState(0);
 
-  // NEW: timer state displayed INSIDE the question modal header (top edge)
+  // Timer state displayed inside QuestionModal header
   const [timerSeconds, setTimerSeconds] = useState(null);
   const [timerActive, setTimerActive] = useState(false);
+  const [timerTotalSeconds, setTimerTotalSeconds] = useState(15); // NEW: dynamic total
   const timerIntervalRef = useRef(null);
 
   const audios = useRef({});
@@ -54,16 +55,23 @@ export default function Display() {
     audio.play().catch(() => {});
   }
 
-  // NEW: timer helpers (local countdown on /display, driven by socket events)
   function stopLocalTimer() {
+    clearInterval(timerIntervalRef.current);
+    timerIntervalRef.current = null;
+
     setTimerActive(false);
     setTimerSeconds(null);
-    clearInterval(timerIntervalRef.current);
+    // keep timerTotalSeconds as last used
   }
 
-  function startLocalTimer(seconds) {
+  function startLocalTimer(totalSeconds) {
+    const s = Number(totalSeconds) || 15;
+
     clearInterval(timerIntervalRef.current);
-    setTimerSeconds(seconds);
+    timerIntervalRef.current = null;
+
+    setTimerTotalSeconds(s);
+    setTimerSeconds(s);
     setTimerActive(true);
 
     timerIntervalRef.current = setInterval(() => {
@@ -71,6 +79,7 @@ export default function Display() {
         if (prev === null) return prev;
         if (prev <= 1) {
           clearInterval(timerIntervalRef.current);
+          timerIntervalRef.current = null;
           setTimerActive(false);
           return 0;
         }
@@ -102,7 +111,7 @@ export default function Display() {
     function onQuestionOpen(question) {
       setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
 
-      // if practical task -> ensure timer not shown
+      // if practical question -> force-hide timer
       if (question?.isPracticalTask) {
         stopLocalTimer();
       }
@@ -138,10 +147,9 @@ export default function Display() {
       setGameState(prev => (prev ? { ...prev, buzzersActive: false } : prev));
     }
 
-    // NEW: listen timer events and show timer ONLY for non-practical questions
+    // FIX: timer_start handler must NOT read stale gameState from closure.
+    // We allow timer to start; we only *hide* it when the current question is practical (handled by onQuestionOpen).
     function onTimerStart({ seconds }) {
-      const q = gameState?.currentQuestion;
-      if (q?.isPracticalTask) return; // ignore timer for practical tasks
       startLocalTimer(seconds || 15);
     }
 
@@ -175,9 +183,11 @@ export default function Display() {
       socket.off('buzzer_deactivated', onBuzzerDeactivated);
       socket.off('timer_start', onTimerStart);
       socket.off('timer_stop', onTimerStop);
+
       clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
     };
-  }, [audioUnlocked, prevQueueLength, gameState?.currentQuestion]);
+  }, [audioUnlocked, prevQueueLength]);
 
   if (!authorized) {
     return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
@@ -222,8 +232,8 @@ export default function Display() {
           question={gameState.currentQuestion}
           answerRevealed={gameState.answerRevealed}
           isControl={false}
-          // NEW: show timer in header, top edge of modal
           timerSeconds={showQuestionTimer ? timerSeconds : null}
+          timerTotalSeconds={timerTotalSeconds}   // NEW
           timerActive={timerActive}
         />
       )}
@@ -233,7 +243,6 @@ export default function Display() {
         <div style={styles.boardSection}>
           <h1 style={styles.title}>JEOPARDY</h1>
           <Board questions={gameState.questions} onSelectQuestion={null} isDisplay={true} hidesPractice={true} />
-          {/* REMOVED: Timer component from bottom (it was hard to see) */}
         </div>
 
         {/* Side panel */}
