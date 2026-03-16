@@ -92,102 +92,115 @@ function validateTeamToken(teamId, deviceId, token) {
 }
 
 // ===============================
-// AUTO-TIMER PER TEAM (NEW)
+// AUTO-TIMER PER TEAM (FIXED)
 // ===============================
 const DEFAULT_ANSWER_SECONDS = 15;
-let activeTeamTimer = null; // NodeJS timeout handle (one global game)
+
+// we store explicit info about which team is currently timed
+let activeTeamTimer = null; // timeout handle
+let activeTimedTeamId = null;
 
 function clearActiveTeamTimer() {
-  if (activeTeamTimer) {
-    clearTimeout(activeTeamTimer);
-    activeTeamTimer = null;
-  }
+  if (activeTeamTimer) clearTimeout(activeTeamTimer);
+  activeTeamTimer = null;
+  activeTimedTeamId = null;
 }
 
-function stopTeamTimerBroadcast() {
-  state.timerActive = false;
-  saveState(state);
+function emitTimerStop() {
   io.emit('timer_stop');
+  state.timerActive = false;
+  state.timerSeconds = null;
+  saveState(state);
   io.emit('game_state', state);
 }
 
-function startTeamTimerBroadcast(seconds) {
+function emitTimerStart(seconds) {
+  io.emit('timer_start', { seconds });
   state.timerActive = true;
   state.timerSeconds = seconds;
   saveState(state);
-  io.emit('timer_start', { seconds });
   io.emit('game_state', state);
 }
 
-// Start timer for FIRST team in queue, only if:
-// - there is an open non-practical question
-// - there is at least one team in queue
-function maybeStartTimerForFirstTeam() {
-  if (!state.currentQuestion) return;
-  if (state.currentQuestion.isPracticalTask) return;
-
-  if (!Array.isArray(state.buzzerQueue) || state.buzzerQueue.length === 0) return;
-
-  // already running
-  if (activeTeamTimer) return;
-
-  const seconds = DEFAULT_ANSWER_SECONDS;
-  startTeamTimerBroadcast(seconds);
-
-  activeTeamTimer = setTimeout(() => {
-    activeTeamTimer = null;
-    handleTimeoutForCurrentTeam();
-  }, seconds * 1000);
+function canRunAutoTimer() {
+  if (!state.currentQuestion) return false;
+  if (state.currentQuestion.isPracticalTask) return false;
+  if (!state.buzzersActive) return false;
+  return true;
 }
 
-// When time expires: subtract points for current first team, advance queue, restart timer if next exists
-function handleTimeoutForCurrentTeam() {
-  if (!state.currentQuestion) return;
-  if (state.currentQuestion.isPracticalTask) return;
-
+function getFirstTeamId() {
   const first = state.buzzerQueue?.[0];
-  if (!first) {
-    stopTeamTimerBroadcast();
+  return first?.teamId || null;
+}
+
+function startTimerForCurrentFirstTeam() {
+  if (!canRunAutoTimer()) return;
+
+  const teamId = getFirstTeamId();
+  if (!teamId) {
+    // no one to time
+    clearActiveTeamTimer();
+    emitTimerStop();
     return;
   }
 
-  const teamId = first.teamId;
+  // IMPORTANT: do not restart timer if same team already being timed
+  if (activeTeamTimer && activeTimedTeamId === teamId) return;
+
+  // restart for new first team
+  clearActiveTeamTimer();
+
+  const seconds = DEFAULT_ANSWER_SECONDS;
+  activeTimedTeamId = teamId;
+
+  emitTimerStart(seconds);
+
+  activeTeamTimer = setTimeout(() => {
+    activeTeamTimer = null;
+    const timedTeamId = activeTimedTeamId;
+    activeTimedTeamId = null;
+    handleTimeout(timedTeamId);
+  }, seconds * 1000);
+}
+
+function handleTimeout(timedTeamId) {
+  // timeout should only apply if still same question open and team is still first
+  if (!canRunAutoTimer()) return;
+  if (!state.currentQuestion) return;
+
+  const currentFirst = getFirstTeamId();
+  if (!currentFirst) {
+    emitTimerStop();
+    return;
+  }
+
+  // if queue moved meanwhile and timed team isn't first anymore, just start timer for new first
+  if (timedTeamId && currentFirst !== timedTeamId) {
+    startTimerForCurrentFirstTeam();
+    return;
+  }
+
   const points = state.currentQuestion.points;
 
-  // timeout counts as WRONG -> deduct points + next team
-  state.teams = subtractPoints(state.teams, teamId, points);
+  // timeout = wrong => subtract + next team
+  state.teams = subtractPoints(state.teams, currentFirst, points);
   state.buzzerQueue = nextTeam(state.buzzerQueue);
 
   saveState(state);
 
-  io.emit('answer_result', { correct: false, teamId, reason: 'timeout' });
+  io.emit('answer_result', { correct: false, teamId: currentFirst, reason: 'timeout' });
   io.emit('score_update', state.teams);
   io.emit('buzzer_update', state.buzzerQueue);
   io.emit('game_state', state);
 
-  // stop previous timer display, then start again for next team (if any)
-  io.emit('timer_stop');
-
-  // Start new timer if there is another team waiting
-  if (state.buzzerQueue.length > 0) {
-    maybeStartTimerForFirstTeam();
-  } else {
-    stopTeamTimerBroadcast();
-  }
+  // Now start timer for the next team (if any)
+  startTimerForCurrentFirstTeam();
 }
 
-// Helper: whenever we move queue (wrong/timeout/next_team), restart timer for new first team
-function restartTimerForNewFirstTeam() {
-  if (!state.currentQuestion || state.currentQuestion.isPracticalTask) return;
-
-  clearActiveTeamTimer();
-  io.emit('timer_stop');
-
-  if (state.buzzerQueue?.length > 0) {
-    maybeStartTimerForFirstTeam();
-  } else {
-    stopTeamTimerBroadcast();
-  }
+// When something changes queue (wrong, next_team, timeout, etc.) call this
+function onQueuePossiblyChanged() {
+  startTimerForCurrentFirstTeam();
 }
 
 // ===============================
@@ -304,16 +317,15 @@ io.on('connection', (socket) => {
     socket.emit('game_state', state);
   });
 
-  // GM selects a question (LOCK: cannot select another while one is open)
   socket.on('select_question', ({ questionId }) => {
     if (state.currentQuestion) return;
 
     const question = state.questions.find(q => q.id === questionId);
     if (!question || question.used) return;
 
-    // reset any previous timers/queue
+    // reset timer
     clearActiveTeamTimer();
-    io.emit('timer_stop');
+    emitTimerStop();
 
     state.currentQuestion = question;
     state.answerRevealed = false;
@@ -322,17 +334,9 @@ io.on('connection', (socket) => {
       state.buzzersActive = false;
       state.buzzerQueue = resetQueue();
       state.practicalPendingTeamIds = (state.teams || []).map(t => t.id);
-
-      state.timerActive = false;
-      state.timerSeconds = null;
     } else {
-      // Non-practical: buzzer active, but TIMER DOES NOT START YET.
-      // It starts only when first team buzzes.
       state.buzzersActive = true;
       state.buzzerQueue = resetQueue();
-
-      state.timerActive = false;
-      state.timerSeconds = null;
     }
 
     saveState(state);
@@ -347,7 +351,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // Practical tasks: mark one team as processed (skip or correct)
   socket.on('practical_mark_team_done', ({ teamId }) => {
     if (!state.currentQuestion || !state.currentQuestion.isPracticalTask) return;
 
@@ -367,12 +370,10 @@ io.on('connection', (socket) => {
       state.buzzerQueue = resetQueue();
 
       clearActiveTeamTimer();
-      state.timerActive = false;
-      state.timerSeconds = null;
+      emitTimerStop();
 
       saveState(state);
       io.emit('question_close');
-      io.emit('timer_stop');
       io.emit('game_state', state);
       return;
     }
@@ -381,7 +382,6 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // GM closes question without judging
   socket.on('close_question', () => {
     if (state.currentQuestion) {
       state.questions = state.questions.map(q =>
@@ -396,12 +396,10 @@ io.on('connection', (socket) => {
     state.buzzerQueue = resetQueue();
 
     clearActiveTeamTimer();
-    state.timerActive = false;
-    state.timerSeconds = null;
+    emitTimerStop();
 
     saveState(state);
 
-    io.emit('timer_stop');
     io.emit('question_close');
     io.emit('game_state', state);
   });
@@ -410,14 +408,11 @@ io.on('connection', (socket) => {
     state.buzzersActive = true;
     state.buzzerQueue = resetQueue();
 
-    // timer still not started; it starts on first buzz
     clearActiveTeamTimer();
-    state.timerActive = false;
-    state.timerSeconds = null;
+    emitTimerStop();
 
     saveState(state);
 
-    io.emit('timer_stop');
     io.emit('buzzer_activated');
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('game_state', state);
@@ -428,18 +423,15 @@ io.on('connection', (socket) => {
     state.buzzerQueue = resetQueue();
 
     clearActiveTeamTimer();
-    state.timerActive = false;
-    state.timerSeconds = null;
+    emitTimerStop();
 
     saveState(state);
 
-    io.emit('timer_stop');
     io.emit('buzzer_deactivated');
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('game_state', state);
   });
 
-  // Team buzzes in (TOKEN + OWNER protected)
   socket.on('buzz', ({ teamId, deviceId, token, timestamp }) => {
     if (!state.buzzersActive) return;
     if (!state.currentQuestion) return;
@@ -461,28 +453,25 @@ io.on('connection', (socket) => {
       io.emit('buzzer_update', state.buzzerQueue);
       io.emit('game_state', state);
 
-      // NEW: if this was the FIRST buzz (queue was empty), start timer now
+      // start timer only after first buzz; if more teams buzz, timer MUST NOT stop
       if (prevLength === 0) {
-        maybeStartTimerForFirstTeam();
+        onQueuePossiblyChanged(); // starts timer for first
       }
     }
   });
 
-  // GM judges answer (normal questions)
   socket.on('judge_answer', ({ correct, teamId }) => {
     if (!state.currentQuestion) return;
 
     const points = state.currentQuestion.points;
     const isPractical = state.currentQuestion.isPracticalTask;
 
-    // For normal questions, we enforce "only first team can be judged"
     if (!isPractical) {
       const first = state.buzzerQueue?.[0];
       if (!first || first.teamId !== teamId) return;
     }
 
     if (correct) {
-      // correct: add points, close question, stop timer
       state.teams = addPoints(state.teams, teamId, points);
       state.questions = state.questions.map(q =>
         q.id === state.currentQuestion.id ? { ...q, used: true } : q
@@ -495,21 +484,18 @@ io.on('connection', (socket) => {
       state.answerRevealed = false;
 
       clearActiveTeamTimer();
-      state.timerActive = false;
-      state.timerSeconds = null;
+      emitTimerStop();
 
       saveState(state);
 
       io.emit('answer_result', { correct, teamId });
       io.emit('score_update', state.teams);
       io.emit('buzzer_update', state.buzzerQueue);
-      io.emit('timer_stop');
       io.emit('game_state', state);
       io.emit('question_close');
       return;
     }
 
-    // WRONG:
     if (!isPractical) {
       state.teams = subtractPoints(state.teams, teamId, points);
       state.buzzerQueue = nextTeam(state.buzzerQueue);
@@ -521,9 +507,7 @@ io.on('connection', (socket) => {
       io.emit('buzzer_update', state.buzzerQueue);
       io.emit('game_state', state);
 
-      // NEW: restart timer for next team automatically
-      restartTimerForNewFirstTeam();
-      return;
+      onQueuePossiblyChanged(); // restart for next
     }
   });
 
@@ -535,21 +519,9 @@ io.on('connection', (socket) => {
     io.emit('game_state', state);
   });
 
-  // Keep these endpoints for compatibility, but you won't need them now:
-  socket.on('start_timer', ({ seconds }) => {
-    // Manual start (optional). We'll still support it.
-    clearActiveTeamTimer();
-    startTeamTimerBroadcast(seconds || DEFAULT_ANSWER_SECONDS);
-
-    activeTeamTimer = setTimeout(() => {
-      activeTeamTimer = null;
-      handleTimeoutForCurrentTeam();
-    }, (seconds || DEFAULT_ANSWER_SECONDS) * 1000);
-  });
-
   socket.on('stop_timer', () => {
     clearActiveTeamTimer();
-    stopTeamTimerBroadcast();
+    emitTimerStop();
   });
 
   socket.on('reveal_answer', () => {
@@ -561,14 +533,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('next_team', () => {
-    // If GM forces next team, timer should restart for new first team
     state.buzzerQueue = nextTeam(state.buzzerQueue);
     saveState(state);
 
     io.emit('buzzer_update', state.buzzerQueue);
     io.emit('game_state', state);
 
-    restartTimerForNewFirstTeam();
+    onQueuePossiblyChanged();
   });
 
   socket.on('reset_game', () => {
@@ -576,8 +547,8 @@ io.on('connection', (socket) => {
     saveState(state);
 
     clearActiveTeamTimer();
+    emitTimerStop();
 
-    io.emit('timer_stop');
     io.emit('game_state', state);
     io.emit('question_close');
     io.emit('buzzer_update', state.buzzerQueue);
