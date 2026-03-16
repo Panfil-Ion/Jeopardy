@@ -9,6 +9,9 @@ export default function Control() {
   const [gameState, setGameState] = useState(null);
   const [adjustAmounts, setAdjustAmounts] = useState({});
 
+  // NEW: GM timer input
+  const [timerInputSeconds, setTimerInputSeconds] = useState(15);
+
   useEffect(() => {
     function onGameState(state) {
       setGameState(state);
@@ -87,6 +90,16 @@ export default function Control() {
     return parseInt(adjustAmounts[teamId] || 100, 10) || 100;
   }
 
+  function startAutoTimer() {
+    const seconds = Number(timerInputSeconds);
+    if (!Number.isFinite(seconds) || seconds <= 0) return;
+    socket.emit('start_timer', { seconds });
+  }
+
+  function stopAutoTimer() {
+    socket.emit('stop_timer');
+  }
+
   return (
     <div style={styles.page}>
       <h1 style={styles.title}>🎮 GAME MASTER CONTROL</h1>
@@ -123,6 +136,30 @@ export default function Control() {
                   <div style={styles.answerText}>{currentQuestion.answer}</div>
                 </div>
               </div>
+
+              {/* GM TIMER CONTROLS (manual enable/disable for students) */}
+              {!currentQuestion.isPracticalTask && (
+                <div style={styles.sectionInner}>
+                  <div style={{ color: '#FFD700', fontSize: '13px', marginBottom: '8px' }}>
+                    ⏱ Timer control (GM): Start enables AUTO timer per team; Stop disables timer completely.
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <input
+                      type="number"
+                      min="1"
+                      value={timerInputSeconds}
+                      onChange={e => setTimerInputSeconds(e.target.value)}
+                      style={styles.timerInput}
+                    />
+                    <button style={{ ...styles.btn, background: '#1a3a7a' }} onClick={startAutoTimer}>
+                      ▶️ Start Timer (AUTO)
+                    </button>
+                    <button style={{ ...styles.btn, background: '#555' }} onClick={stopAutoTimer}>
+                      ⏹ Stop Timer
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {currentQuestion.isPracticalTask ? (
                 <div style={styles.judgeSection}>
@@ -182,7 +219,7 @@ export default function Control() {
                     </button>
                   </div>
                   <div style={{ color: '#aaa', fontSize: '12px' }}>
-                    Timerul pornește automat când prima echipă apasă buzzer. La timeout scade automat punctele și trece la următoarea echipă.
+                    Timerul pornește automat doar dacă GM a apăsat Start Timer. La timeout scade automat punctele și trece la următoarea echipă.
                   </div>
                 </div>
               ) : (
@@ -205,7 +242,7 @@ export default function Control() {
               <div style={styles.controlRow}>
                 {!answerRevealed && (
                   <button style={{ ...styles.btn, background: '#1a3a7a' }} onClick={() => socket.emit('reveal_answer')}>
-                    �� Reveal Answer
+                    👁 Reveal Answer
                   </button>
                 )}
                 {buzzerQueue.length > 1 && (
@@ -323,6 +360,24 @@ const styles = {
     border: '2px solid #000080',
     borderRadius: '8px',
     padding: '14px',
+  },
+  sectionInner: {
+    background: '#0d0d3a',
+    border: '1px solid #000080',
+    borderRadius: '6px',
+    padding: '10px',
+    marginBottom: '12px',
+  },
+  timerInput: {
+    width: '110px',
+    padding: '8px',
+    borderRadius: '6px',
+    border: '1px solid #444',
+    background: '#222',
+    color: 'white',
+    fontSize: '13px',
+    textAlign: 'center',
+    fontFamily: '"Arial Black", Arial, sans-serif',
   },
   sectionTitle: {
     color: '#FFD700',
