@@ -21,10 +21,10 @@ export default function Display() {
   const [flashOverlay, setFlashOverlay] = useState(null); // 'correct' | 'wrong' | null
   const [prevQueueLength, setPrevQueueLength] = useState(0);
 
-  // Timer state displayed inside QuestionModal header
+  // IMPORTANT: timer is shown only if we received timer_start (seconds != null)
   const [timerSeconds, setTimerSeconds] = useState(null);
   const [timerActive, setTimerActive] = useState(false);
-  const [timerTotalSeconds, setTimerTotalSeconds] = useState(15); // NEW: dynamic total
+  const [timerTotalSeconds, setTimerTotalSeconds] = useState(15);
   const timerIntervalRef = useRef(null);
 
   const audios = useRef({});
@@ -34,7 +34,6 @@ export default function Display() {
     audios.current.correct = createAudio('/sounds/correct.mp3');
     audios.current.wrong = createAudio('/sounds/wrong.mp3');
 
-    // Play a silent buffer to unlock
     Object.values(audios.current).forEach(a => {
       a.volume = 0.01;
       a.play().catch(() => {});
@@ -61,7 +60,6 @@ export default function Display() {
 
     setTimerActive(false);
     setTimerSeconds(null);
-    // keep timerTotalSeconds as last used
   }
 
   function startLocalTimer(totalSeconds) {
@@ -111,10 +109,8 @@ export default function Display() {
     function onQuestionOpen(question) {
       setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
 
-      // if practical question -> force-hide timer
-      if (question?.isPracticalTask) {
-        stopLocalTimer();
-      }
+      // Question opened => timer must be hidden until first buzz triggers timer_start from server
+      stopLocalTimer();
     }
 
     function onQuestionClose() {
@@ -147,8 +143,6 @@ export default function Display() {
       setGameState(prev => (prev ? { ...prev, buzzersActive: false } : prev));
     }
 
-    // FIX: timer_start handler must NOT read stale gameState from closure.
-    // We allow timer to start; we only *hide* it when the current question is practical (handled by onQuestionOpen).
     function onTimerStart({ seconds }) {
       startLocalTimer(seconds || 15);
     }
@@ -216,7 +210,6 @@ export default function Display() {
 
   return (
     <div style={styles.page}>
-      {/* Flash overlay for correct/wrong */}
       {flashOverlay && (
         <div
           style={{
@@ -226,26 +219,23 @@ export default function Display() {
         />
       )}
 
-      {/* Question modal */}
       {gameState.currentQuestion && (
         <QuestionModal
           question={gameState.currentQuestion}
           answerRevealed={gameState.answerRevealed}
           isControl={false}
           timerSeconds={showQuestionTimer ? timerSeconds : null}
-          timerTotalSeconds={timerTotalSeconds}   // NEW
+          timerTotalSeconds={timerTotalSeconds}
           timerActive={timerActive}
         />
       )}
 
       <div style={styles.layout}>
-        {/* Main board */}
         <div style={styles.boardSection}>
           <h1 style={styles.title}>JEOPARDY</h1>
           <Board questions={gameState.questions} onSelectQuestion={null} isDisplay={true} hidesPractice={true} />
         </div>
 
-        {/* Side panel */}
         <div style={styles.sidePanel}>
           <BuzzerQueue queue={gameState.buzzerQueue} teams={gameState.teams} large />
           <div style={{ marginTop: '16px' }}>
