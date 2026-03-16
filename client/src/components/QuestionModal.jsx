@@ -1,20 +1,42 @@
-export default function QuestionModal({ question, answerRevealed, isControl = false, onClose }) {
+export default function QuestionModal({
+  question,
+  answerRevealed,
+  isControl = false,
+  onClose,
+  timerSeconds = null, // NEW
+  timerActive = false, // NEW
+}) {
   if (!question) return null;
+
+  const showTimer = !question.isPracticalTask && timerSeconds !== null;
 
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
+        {/* NEW: timer strip pinned to top edge of modal */}
+        {showTimer && (
+          <div style={styles.timerStrip}>
+            <div style={styles.timerText}>
+              ⏱ {timerSeconds}s {timerActive ? '' : '(paused)'}
+            </div>
+            <div style={styles.timerBarBg}>
+              <div
+                style={{
+                  ...styles.timerBarFill,
+                  width: `${Math.max(0, Math.min(100, (timerSeconds / 15) * 100))}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
         <div style={styles.header}>
           <span style={styles.category}>{question.category}</span>
           <span style={styles.points}>${question.points}</span>
-          {question.isPracticalTask && (
-            <span style={styles.practicalBadge}>🔧 PRACTICAL TASK</span>
-          )}
+          {question.isPracticalTask && <span style={styles.practicalBadge}>🔧 PRACTICAL TASK</span>}
         </div>
 
-        <div style={styles.questionText}>
-          {question.question}
-        </div>
+        <div style={styles.questionText}>{question.question}</div>
 
         {!question.isPracticalTask && (answerRevealed || isControl) && (
           <div style={styles.answerSection}>
@@ -45,6 +67,7 @@ const styles = {
     padding: '20px',
   },
   modal: {
+    position: 'relative',
     background: '#060ce9',
     border: '4px solid #FFD700',
     borderRadius: '12px',
@@ -53,7 +76,40 @@ const styles = {
     width: '100%',
     textAlign: 'center',
     fontFamily: '"Arial Black", Arial, sans-serif',
+    overflow: 'hidden',
   },
+
+  // NEW timer styles
+  timerStrip: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    background: '#0d0d3a',
+    borderBottom: '2px solid #FFD700',
+    padding: '10px 16px',
+  },
+  timerText: {
+    color: '#FFD700',
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginBottom: '8px',
+    fontSize: '18px',
+  },
+  timerBarBg: {
+    width: '100%',
+    height: '12px',
+    background: '#1a1a4a',
+    borderRadius: '8px',
+    overflow: 'hidden',
+  },
+  timerBarFill: {
+    height: '100%',
+    background: '#4caf50',
+    borderRadius: '8px',
+    transition: 'width 1s linear',
+  },
+
   header: {
     display: 'flex',
     justifyContent: 'center',
@@ -61,6 +117,7 @@ const styles = {
     gap: '20px',
     marginBottom: '30px',
     flexWrap: 'wrap',
+    marginTop: '20px', // gives space under timer strip
   },
   category: {
     color: '#FFD700',
