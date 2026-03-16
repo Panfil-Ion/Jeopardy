@@ -4,7 +4,6 @@ import socket from '../socket.js';
 import Board from '../components/Board.jsx';
 import Scoreboard from '../components/Scoreboard.jsx';
 import BuzzerQueue from '../components/BuzzerQueue.jsx';
-import Timer from '../components/Timer.jsx';
 import QuestionModal from '../components/QuestionModal.jsx';
 import AdminPasswordGate from '../components/AdminPasswordGate.jsx';
 
@@ -22,9 +21,12 @@ export default function Display() {
   const [flashOverlay, setFlashOverlay] = useState(null); // 'correct' | 'wrong' | null
   const [prevQueueLength, setPrevQueueLength] = useState(0);
 
-  const audios = useRef({});
+  // NEW: timer state displayed INSIDE the question modal header (top edge)
+  const [timerSeconds, setTimerSeconds] = useState(null);
+  const [timerActive, setTimerActive] = useState(false);
+  const timerIntervalRef = useRef(null);
 
-  // Password check replaced by AdminPasswordGate component
+  const audios = useRef({});
 
   function unlockAudio() {
     audios.current.buzzer = createAudio('/sounds/buzzer.mp3');
@@ -35,7 +37,11 @@ export default function Display() {
     Object.values(audios.current).forEach(a => {
       a.volume = 0.01;
       a.play().catch(() => {});
-      setTimeout(() => { a.pause(); a.currentTime = 0; a.volume = 1; }, 100);
+      setTimeout(() => {
+        a.pause();
+        a.currentTime = 0;
+        a.volume = 1;
+      }, 100);
     });
 
     setAudioUnlocked(true);
@@ -46,6 +52,31 @@ export default function Display() {
     if (!audio) return;
     audio.currentTime = 0;
     audio.play().catch(() => {});
+  }
+
+  // NEW: timer helpers (local countdown on /display, driven by socket events)
+  function stopLocalTimer() {
+    setTimerActive(false);
+    setTimerSeconds(null);
+    clearInterval(timerIntervalRef.current);
+  }
+
+  function startLocalTimer(seconds) {
+    clearInterval(timerIntervalRef.current);
+    setTimerSeconds(seconds);
+    setTimerActive(true);
+
+    timerIntervalRef.current = setInterval(() => {
+      setTimerSeconds(prev => {
+        if (prev === null) return prev;
+        if (prev <= 1) {
+          clearInterval(timerIntervalRef.current);
+          setTimerActive(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
   }
 
   useEffect(() => {
@@ -65,15 +96,21 @@ export default function Display() {
     }
 
     function onScoreUpdate(teams) {
-      setGameState(prev => prev ? { ...prev, teams } : prev);
+      setGameState(prev => (prev ? { ...prev, teams } : prev));
     }
 
     function onQuestionOpen(question) {
-      setGameState(prev => prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev);
+      setGameState(prev => (prev ? { ...prev, currentQuestion: question, answerRevealed: false } : prev));
+
+      // if practical task -> ensure timer not shown
+      if (question?.isPracticalTask) {
+        stopLocalTimer();
+      }
     }
 
     function onQuestionClose() {
-      setGameState(prev => prev ? { ...prev, currentQuestion: null, answerRevealed: false } : prev);
+      setGameState(prev => (prev ? { ...prev, currentQuestion: null, answerRevealed: false } : prev));
+      stopLocalTimer();
     }
 
     function onAnswerResult({ correct }) {
@@ -90,15 +127,26 @@ export default function Display() {
     }
 
     function onAnswerRevealed() {
-      setGameState(prev => prev ? { ...prev, answerRevealed: true } : prev);
+      setGameState(prev => (prev ? { ...prev, answerRevealed: true } : prev));
     }
 
     function onBuzzerActivated() {
-      setGameState(prev => prev ? { ...prev, buzzersActive: true } : prev);
+      setGameState(prev => (prev ? { ...prev, buzzersActive: true } : prev));
     }
 
     function onBuzzerDeactivated() {
-      setGameState(prev => prev ? { ...prev, buzzersActive: false } : prev);
+      setGameState(prev => (prev ? { ...prev, buzzersActive: false } : prev));
+    }
+
+    // NEW: listen timer events and show timer ONLY for non-practical questions
+    function onTimerStart({ seconds }) {
+      const q = gameState?.currentQuestion;
+      if (q?.isPracticalTask) return; // ignore timer for practical tasks
+      startLocalTimer(seconds || 15);
+    }
+
+    function onTimerStop() {
+      stopLocalTimer();
     }
 
     socket.on('game_state', onGameState);
@@ -110,6 +158,8 @@ export default function Display() {
     socket.on('answer_revealed', onAnswerRevealed);
     socket.on('buzzer_activated', onBuzzerActivated);
     socket.on('buzzer_deactivated', onBuzzerDeactivated);
+    socket.on('timer_start', onTimerStart);
+    socket.on('timer_stop', onTimerStop);
 
     socket.emit('request_state');
 
@@ -123,8 +173,11 @@ export default function Display() {
       socket.off('answer_revealed', onAnswerRevealed);
       socket.off('buzzer_activated', onBuzzerActivated);
       socket.off('buzzer_deactivated', onBuzzerDeactivated);
+      socket.off('timer_start', onTimerStart);
+      socket.off('timer_stop', onTimerStop);
+      clearInterval(timerIntervalRef.current);
     };
-  }, [audioUnlocked, prevQueueLength]);
+  }, [audioUnlocked, prevQueueLength, gameState?.currentQuestion]);
 
   if (!authorized) {
     return <AdminPasswordGate onAuthorized={() => setAuthorized(true)} />;
@@ -146,16 +199,21 @@ export default function Display() {
     return <div style={styles.loading}>Connecting to server...</div>;
   }
 
+  const showQuestionTimer =
+    !!gameState.currentQuestion &&
+    !gameState.currentQuestion.isPracticalTask &&
+    timerSeconds !== null;
+
   return (
     <div style={styles.page}>
       {/* Flash overlay for correct/wrong */}
       {flashOverlay && (
-        <div style={{
-          ...styles.flashOverlay,
-          background: flashOverlay === 'correct'
-            ? 'rgba(76, 175, 80, 0.5)'
-            : 'rgba(244, 67, 54, 0.5)',
-        }} />
+        <div
+          style={{
+            ...styles.flashOverlay,
+            background: flashOverlay === 'correct' ? 'rgba(76, 175, 80, 0.5)' : 'rgba(244, 67, 54, 0.5)',
+          }}
+        />
       )}
 
       {/* Question modal */}
@@ -164,6 +222,9 @@ export default function Display() {
           question={gameState.currentQuestion}
           answerRevealed={gameState.answerRevealed}
           isControl={false}
+          // NEW: show timer in header, top edge of modal
+          timerSeconds={showQuestionTimer ? timerSeconds : null}
+          timerActive={timerActive}
         />
       )}
 
@@ -172,7 +233,7 @@ export default function Display() {
         <div style={styles.boardSection}>
           <h1 style={styles.title}>JEOPARDY</h1>
           <Board questions={gameState.questions} onSelectQuestion={null} isDisplay={true} hidesPractice={true} />
-          <Timer large />
+          {/* REMOVED: Timer component from bottom (it was hard to see) */}
         </div>
 
         {/* Side panel */}
@@ -181,11 +242,7 @@ export default function Display() {
           <div style={{ marginTop: '16px' }}>
             <Scoreboard teams={gameState.teams} large />
           </div>
-          {gameState.buzzersActive && (
-            <div style={styles.buzzersActiveIndicator}>
-              🔔 BUZZERS ACTIVE
-            </div>
-          )}
+          {gameState.buzzersActive && <div style={styles.buzzersActiveIndicator}>🔔 BUZZERS ACTIVE</div>}
         </div>
       </div>
     </div>
