@@ -253,7 +253,7 @@ app.post('/api/check-password', rateLimitMiddleware, (req, res) => {
 // TEAM LOGIN (LOCKED)
 // ===============================
 app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
-  const { teamId, password, teamName, deviceId, force } = req.body;
+  const { teamId, password, teamName, deviceId } = req.body;
 
   if (!deviceId) return res.status(400).json({ ok: false, error: 'Missing deviceId' });
 
@@ -263,7 +263,7 @@ app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
 
   const existingOwner = getOwner(teamId);
 
-  // NOU: refuzăm TAKEOVER dacă există deja owner diferit, indiferent de “force”
+  // Dacă există owner și deviceId diferit, buzzerul este folosit!
   if (existingOwner && existingOwner.deviceId !== deviceId) {
     return res.status(409).json({
       ok: false,
@@ -271,6 +271,12 @@ app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
       code: 'BUZZER_IN_USE',
     });
   }
+
+  // Dacă nu există owner, PERMIȚI login-ul!
+  const token = setOwner(teamId, deviceId);
+
+  // (Restul logicii ca și înainte)
+  io.emit('team_owner_changed', { teamId });
 
   // Ensure team exists in state (auto-register if missing)
   if (!state.teams.find(t => t.id === teamId)) {
@@ -287,24 +293,17 @@ app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
     }
   }
 
-  // Set/replace owner (dacă nu există owner sau același device re-login)
-  const token = setOwner(teamId, deviceId);
-
-  io.emit('team_owner_changed', { teamId });
-
   res.json({ ok: true, token });
 });
 
-// ===============================
-// TEAM LOGOUT (same as înainte, nu trebuie modificat decât pentru claritate)
-// ===============================
 app.post('/api/team-logout', rateLimitMiddleware, (req, res) => {
   const { teamId, deviceId, token } = req.body;
   const owner = getOwner(teamId);
   if (!owner) return res.json({ ok: true });
 
+  // Device-ul owner dă logout: eliberezi slotul!
   if (owner.deviceId === deviceId && owner.token === token) {
-    teamOwner.delete(teamId);  // release owner
+    teamOwner.delete(teamId);
     io.emit('team_owner_changed', { teamId });
     return res.json({ ok: true });
   }
