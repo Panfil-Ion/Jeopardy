@@ -263,14 +263,16 @@ app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
 
   const existingOwner = getOwner(teamId);
 
-  if (existingOwner && existingOwner.deviceId !== deviceId && !force) {
+  // NOU: refuzăm TAKEOVER dacă există deja owner diferit, indiferent de “force”
+  if (existingOwner && existingOwner.deviceId !== deviceId) {
     return res.status(409).json({
       ok: false,
-      error: 'Team already in use on another device',
-      code: 'TEAM_IN_USE',
+      error: 'Buzzerul deja este folosit, nu poți prelua controlul',
+      code: 'BUZZER_IN_USE',
     });
   }
 
+  // Ensure team exists in state (auto-register if missing)
   if (!state.teams.find(t => t.id === teamId)) {
     const name = (teamName || '').trim() || teamId;
     state.teams.push({ id: teamId, name, score: 0 });
@@ -285,19 +287,24 @@ app.post('/api/team-login', rateLimitMiddleware, (req, res) => {
     }
   }
 
+  // Set/replace owner (dacă nu există owner sau același device re-login)
   const token = setOwner(teamId, deviceId);
+
   io.emit('team_owner_changed', { teamId });
 
   res.json({ ok: true, token });
 });
 
+// ===============================
+// TEAM LOGOUT (same as înainte, nu trebuie modificat decât pentru claritate)
+// ===============================
 app.post('/api/team-logout', rateLimitMiddleware, (req, res) => {
   const { teamId, deviceId, token } = req.body;
   const owner = getOwner(teamId);
   if (!owner) return res.json({ ok: true });
 
   if (owner.deviceId === deviceId && owner.token === token) {
-    teamOwner.delete(teamId);
+    teamOwner.delete(teamId);  // release owner
     io.emit('team_owner_changed', { teamId });
     return res.json({ ok: true });
   }
