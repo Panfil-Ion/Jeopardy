@@ -14,6 +14,24 @@ function createAudio(src) {
   return audio;
 }
 
+function requestBrowserFullscreen() {
+  const el = document.documentElement;
+  const doc = document;
+  if (doc.fullscreenElement || doc.webkitFullscreenElement || doc.msFullscreenElement) return;
+
+  if (el.requestFullscreen) {
+    el.requestFullscreen().catch(() => {});
+    return;
+  }
+  if (el.webkitRequestFullscreen) {
+    el.webkitRequestFullscreen();
+    return;
+  }
+  if (el.msRequestFullscreen) {
+    el.msRequestFullscreen();
+  }
+}
+
 export default function Display() {
   const [authorized, setAuthorized] = useState(false);
   const [gameState, setGameState] = useState(null);
@@ -163,7 +181,7 @@ export default function Display() {
 
   if (!audioUnlocked) {
     return (
-      <div style={styles.startScreen}>
+      <div style={styles.startScreen} onClick={requestBrowserFullscreen}>
         <h1 style={styles.startTitle}>🎮 JEOPARDY LIVE</h1>
         <p style={styles.startSubtitle}>Click to enable audio and start the game</p>
         <button style={styles.startBtn} onClick={unlockAudio}>
@@ -183,7 +201,7 @@ export default function Display() {
     timerSeconds !== null;
 
   return (
-    <div style={styles.page}>
+    <div style={styles.page} onClick={requestBrowserFullscreen}>
       {flashOverlay && (
         <div
           style={{
