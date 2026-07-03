@@ -225,7 +225,7 @@ export default function Display() {
       <div style={styles.layout}>
         <div style={styles.boardSection}>
           <h1 style={styles.title}>JEOPARDY</h1>
-          <Board questions={gameState.questions} onSelectQuestion={null} isDisplay={true} hidesPractice={true} />
+          <Board questions={gameState.questions} onSelectQuestion={null} isDisplay={true} />
         </div>
 
         <div style={styles.sidePanel}>
