@@ -130,7 +130,10 @@ export default function Control() {
 
               <div style={styles.questionBox}>
                 <div style={styles.questionCat}>{currentQuestion.category}</div>
-                <div style={styles.questionText}>{currentQuestion.question}</div>
+                {currentQuestion.imageUrl && (
+                  <img src={currentQuestion.imageUrl} alt="Question" style={styles.questionImage} />
+                )}
+                {currentQuestion.question && <div style={styles.questionText}>{currentQuestion.question}</div>}
                 <div style={styles.answerBox}>
                   <strong style={{ color: '#4caf50' }}>✅ ANSWER:</strong>
                   <div style={styles.answerText}>{currentQuestion.answer}</div>
@@ -414,6 +417,15 @@ const styles = {
     fontSize: '15px',
     lineHeight: 1.5,
     marginBottom: '10px',
+  },
+  questionImage: {
+    width: '100%',
+    maxHeight: '220px',
+    objectFit: 'contain',
+    borderRadius: '6px',
+    border: '1px solid #FFD700',
+    marginBottom: '10px',
+    background: '#000',
   },
   answerBox: {
     background: '#0a2a0a',

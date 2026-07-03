@@ -8,6 +8,7 @@ export default function Editor() {
   const [questions, setQuestions] = useState([]);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
+  const [uploadingIndex, setUploadingIndex] = useState(null);
 
   // Password check replaced by AdminPasswordGate component
 
@@ -47,9 +48,47 @@ export default function Editor() {
       points: 100,
       question: '',
       answer: '',
+      imageUrl: null,
       isPracticalTask: false,
       used: false,
     }]);
+  }
+
+  async function handleImageUpload(index, file) {
+    if (!file) return;
+
+    const pass = adminPass || sessionStorage.getItem('admin_password') || '';
+    if (!pass) {
+      setSaveMsg('❌ Parolă admin lipsă. Reautentifică-te.');
+      return;
+    }
+
+    setUploadingIndex(index);
+    setSaveMsg('');
+
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      formData.append('pass', pass);
+
+      const res = await fetch('/api/upload-question-image', {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await res.json();
+
+      if (data.ok) {
+        updateQuestion(index, 'imageUrl', data.imageUrl);
+        setSaveMsg('✅ Imagine încărcată. Apasă Save All ca să o salvezi.');
+      } else {
+        setSaveMsg(`❌ ${data.error || 'Upload eșuat'}`);
+      }
+    } catch {
+      setSaveMsg('❌ Connection error.');
+    } finally {
+      setUploadingIndex(null);
+      setTimeout(() => setSaveMsg(''), 3000);
+    }
   }
 
   function deleteQuestion(index) {
@@ -113,6 +152,7 @@ export default function Editor() {
               <th style={styles.th}>Category</th>
               <th style={styles.th}>Points</th>
               <th style={styles.th}>Question</th>
+              <th style={styles.th}>Image</th>
               <th style={styles.th}>Answer</th>
               <th style={styles.th}>Practical</th>
               <th style={styles.th}>Used</th>
@@ -149,9 +189,39 @@ export default function Editor() {
                     style={{ ...styles.textarea, width: '260px' }}
                     value={q.question}
                     onChange={e => updateQuestion(i, 'question', e.target.value)}
-                    placeholder="Question text"
+                    placeholder="Question text (optional if image)"
                     rows={3}
                   />
+                </td>
+                <td style={styles.td}>
+                  <div style={styles.imageCell}>
+                    {q.imageUrl && (
+                      <img src={q.imageUrl} alt="Question" style={styles.imagePreview} />
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={uploadingIndex === i}
+                      onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImageUpload(i, file);
+                        e.target.value = '';
+                      }}
+                      style={styles.fileInput}
+                    />
+                    {uploadingIndex === i && (
+                      <span style={styles.uploadingText}>Se încarcă...</span>
+                    )}
+                    {q.imageUrl && (
+                      <button
+                        type="button"
+                        style={styles.removeImageBtn}
+                        onClick={() => updateQuestion(i, 'imageUrl', null)}
+                      >
+                        ✕ Remove
+                      </button>
+                    )}
+                  </div>
                 </td>
                 <td style={styles.td}>
                   {q.isPracticalTask ? (
@@ -329,5 +399,41 @@ const styles = {
     padding: '6px 10px',
     cursor: 'pointer',
     fontSize: '16px',
+  },
+  imageCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    minWidth: '140px',
+  },
+  imagePreview: {
+    maxWidth: '140px',
+    maxHeight: '90px',
+    objectFit: 'contain',
+    borderRadius: '4px',
+    border: '1px solid #444',
+    background: '#000',
+  },
+  fileInput: {
+    color: '#ccc',
+    fontSize: '11px',
+    fontFamily: 'Arial, sans-serif',
+    maxWidth: '140px',
+  },
+  uploadingText: {
+    color: '#FFD700',
+    fontSize: '11px',
+    fontFamily: 'Arial, sans-serif',
+  },
+  removeImageBtn: {
+    background: '#555',
+    color: 'white',
+    border: 'none',
+    borderRadius: '4px',
+    padding: '4px 8px',
+    cursor: 'pointer',
+    fontSize: '11px',
+    fontFamily: 'Arial, sans-serif',
+    alignSelf: 'flex-start',
   },
 };

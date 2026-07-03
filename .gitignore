@@ -2,4 +2,6 @@ node_modules/
 game_state.json
 client/dist/
 server/public/
+server/uploads/*
+!server/uploads/.gitkeep
 .env

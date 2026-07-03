@@ -46,7 +46,13 @@ export default function QuestionModal({
           {question.isPracticalTask && <span style={styles.practicalBadge}>🔧 PRACTICAL TASK</span>}
         </div>
 
-        <div style={styles.questionText}>{question.question}</div>
+        {question.imageUrl && (
+          <div style={styles.imageWrap}>
+            <img src={question.imageUrl} alt="Question" style={styles.questionImage} />
+          </div>
+        )}
+
+        {question.question && <div style={styles.questionText}>{question.question}</div>}
 
         {!question.isPracticalTask && (answerRevealed || isControl) && (
           <div style={styles.answerSection}>
@@ -143,6 +149,19 @@ const styles = {
     borderRadius: '20px',
     fontSize: 'clamp(12px, 2vw, 18px)',
     fontWeight: 'bold',
+  },
+  imageWrap: {
+    marginBottom: '24px',
+    display: 'flex',
+    justifyContent: 'center',
+  },
+  questionImage: {
+    maxWidth: '100%',
+    maxHeight: 'min(50vh, 420px)',
+    borderRadius: '8px',
+    border: '2px solid #FFD700',
+    objectFit: 'contain',
+    background: '#000',
   },
   questionText: {
     color: 'white',

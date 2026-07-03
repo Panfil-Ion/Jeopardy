@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const multer = require('multer');
 
 const { loadState, saveState, resetState, saveQuestionsToFile } = require('./gameState');
 const { addBuzz, resetQueue, nextTeam } = require('./buzzerManager');
@@ -43,6 +44,27 @@ if (typeof state.timerDurationSeconds !== 'number') state.timerDurationSeconds =
 // Serve React build in production
 const publicDir = path.join(__dirname, 'public');
 app.use(express.static(publicDir));
+
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+app.use('/uploads', express.static(uploadsDir));
+
+const ALLOWED_IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp']);
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname || '').toLowerCase();
+      const safeExt = ALLOWED_IMAGE_EXT.has(ext) ? ext : '.jpg';
+      cb(null, `q_${Date.now()}_${crypto.randomBytes(4).toString('hex')}${safeExt}`);
+    },
+  }),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype && file.mimetype.startsWith('image/')) cb(null, true);
+    else cb(new Error('Only image files are allowed'));
+  },
+});
 
 // ===============================
 // RATE LIMITER
@@ -325,6 +347,77 @@ app.post('/api/update-questions', express.json(), rateLimitMiddleware, (req, res
 
   io.emit('game_state', state);
   res.json({ ok: true });
+});
+
+app.post('/api/upload-question-image', rateLimitMiddleware, (req, res) => {
+  upload.single('image')(req, res, err => {
+    if (err) {
+      return res.status(400).json({ ok: false, error: err.message || 'Upload failed' });
+    }
+
+    const { pass } = req.body;
+    if (pass !== ADMIN_PASSWORD) {
+      if (req.file) fs.unlinkSync(req.file.path);
+      return res.status(403).json({ ok: false, error: 'Unauthorized' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: 'No image provided' });
+    }
+
+    res.json({ ok: true, imageUrl: `/uploads/${req.file.filename}` });
+  });
+});
+
+app.post('/api/add-question', rateLimitMiddleware, (req, res) => {
+  const { pass, category, points, question, answer, isPracticalTask, imageUrl } = req.body;
+  if (pass !== ADMIN_PASSWORD) return res.status(403).json({ ok: false, error: 'Unauthorized' });
+
+  const trimmedCategory = (category || '').trim();
+  const trimmedQuestion = (question || '').trim();
+  const numericPoints = Number(points);
+  const practical = Boolean(isPracticalTask);
+
+  if (!trimmedCategory) {
+    return res.status(400).json({ ok: false, error: 'Category is required' });
+  }
+  if (![100, 200, 300, 400, 500].includes(numericPoints)) {
+    return res.status(400).json({ ok: false, error: 'Points must be 100, 200, 300, 400, or 500' });
+  }
+  if (!trimmedQuestion && !imageUrl) {
+    return res.status(400).json({ ok: false, error: 'Question text or image is required' });
+  }
+  if (!practical && !(answer || '').trim()) {
+    return res.status(400).json({ ok: false, error: 'Answer is required for non-practical questions' });
+  }
+
+  const slotTaken = state.questions.some(
+    q => q.category === trimmedCategory && q.points === numericPoints
+  );
+  if (slotTaken) {
+    return res.status(409).json({
+      ok: false,
+      error: `Slot $${numericPoints} in "${trimmedCategory}" is already taken`,
+    });
+  }
+
+  const newQuestion = {
+    id: `q_${Date.now()}`,
+    category: trimmedCategory,
+    points: numericPoints,
+    question: trimmedQuestion,
+    answer: practical ? '' : (answer || '').trim(),
+    isPracticalTask: practical,
+    imageUrl: imageUrl || null,
+    used: false,
+  };
+
+  state.questions.push(newQuestion);
+  saveQuestionsToFile(state.questions);
+  saveState(state);
+  io.emit('game_state', state);
+
+  res.json({ ok: true, question: newQuestion });
 });
 
 // ===============================
