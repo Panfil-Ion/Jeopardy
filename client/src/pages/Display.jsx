@@ -219,6 +219,7 @@ export default function Display() {
           timerSeconds={showQuestionTimer ? timerSeconds : null}
           timerTotalSeconds={timerTotalSeconds}
           timerActive={timerActive}
+          onClose={() => socket.emit('close_question')}
         />
       )}
 
