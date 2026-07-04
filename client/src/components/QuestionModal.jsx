@@ -61,11 +61,6 @@ export default function QuestionModal({
           </div>
         )}
 
-        {onClose && (
-          <button onClick={onClose} style={styles.closeBtn}>
-            ✕ Close
-          </button>
-        )}
       </div>
     </div>
   );
